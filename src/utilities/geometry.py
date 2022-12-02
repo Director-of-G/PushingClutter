@@ -58,3 +58,11 @@ def steer(start, goal, d):
     u = v / (np.sqrt(np.sum(v ** 2)))
     steered_point = start + u * d
     return tuple(steered_point)
+
+
+class Revolute(object):
+    def __init__(self, finite, x, y, theta) -> None:
+        self.finite = finite  # False=trans(lation) only or True=revol(ution)
+        self.x = x
+        self.y = y
+        self.theta = theta
