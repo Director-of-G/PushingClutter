@@ -2,10 +2,10 @@
 # file 'LICENSE', which is part of this source code package.
 import numpy as np
 
-from src.rrt.rrt import RRT
-from src.search_space.search_space import SearchSpace
-from src.utilities.obstacle_generation import generate_random_obstacles
-from src.utilities.plotting import Plot
+from rrt_pack.rrt.rrt import RRT
+from rrt_pack.search_space.search_space import SearchSpace
+from rrt_pack.utilities.obstacle_generation import generate_random_obstacles
+from rrt_pack.utilities.plotting import Plot
 
 X_dimensions = np.array([(0, 100), (0, 100)])  # dimensions of Search Space
 x_init = (0, 0)  # starting location

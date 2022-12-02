@@ -4,12 +4,11 @@
 import numpy as np
 from rtree import index
 
-from src.utilities.math import angle_clip
-from src.utilities.geometry import es_points_along_line, Revolute
-from src.utilities.obstacle_generation import obstacle_generator
+from rrt_pack.utilities.geometry import es_points_along_line
+from rrt_pack.utilities.obstacle_generation import obstacle_generator
 
 
-class PlanarSearchSpace(object):
+class SearchSpace(object):
     def __init__(self, dimension_lengths, O=None):
         """
         Initialize Search Space
@@ -68,29 +67,6 @@ class PlanarSearchSpace(object):
         points = es_points_along_line(start, end, r)
         coll_free = all(map(self.obstacle_free, points))
         return coll_free
-
-    def pose2steer(self, start, end):
-        """
-        Convert the change between pose to revolution w.r.t. fixed point
-        :param start: current pose
-        :param end: goal pose
-        :return: Revolute (center: (x, y), angle: theta)
-        """
-        p_start, p_end = np.zeros((2, 2)), np.zeros((2, 2))
-        p_start[0, :], p_end[0, :] = start[:2], end[:2]
-        p_start[1, :] = p_start[0, :] + np.array([np.cos(start[2]), np.sin(start[2])])
-        p_end[1, :] = p_end[0, :] + np.array([np.cos(end[2]), np.sin(end[2])])
-        A = 2 * (p_start - p_end)
-        b = np.sum(np.power(p_end) - np.power(p_start), axis=1)
-
-        if np.linalg.matrix_rank(A) < 2:
-            revol = Revolute(finite=False, x=0, y=0, theta=0)
-        else:
-            center = np.linalg.inv(A) @ b
-            theta = angle_clip(end[2] - start[2])
-            revol = Revolute(finite=False, x=center[0], y=center[1], theta=theta)
-
-        return revol
 
     def sample(self):
         """

@@ -6,6 +6,24 @@ from itertools import tee
 import numpy as np
 
 
+def rotation_matrix(theta):
+    return np.array([[np.cos(theta), -np.sin(theta)],
+                     [np.sin(theta), np.cos(theta)]])
+    
+    
+def dist_between_points_arc(a, b, revol):
+    """
+    Return the Euclidean distance between two points on an arc
+    :param a: first point
+    :param b: second point
+    :return: Euclidean distance between a and b
+    """
+    center = np.array([revol.x, revol.y])
+    radius = np.linalg.norm(a - center, ord=2)
+    distance = radius * revol.theta
+    return distance
+
+
 def dist_between_points(a, b):
     """
     Return the Euclidean distance between two points
@@ -26,6 +44,23 @@ def pairwise(iterable):
     a, b = tee(iterable)
     next(b, None)
     return zip(a, b)
+
+
+def es_points_along_arc(start, end, r, revol):
+    """
+    Equally-spaced points along an arc defined by start, end, with resolution r
+    :param start: starting point
+    :param end: ending point
+    :param r: maximum distance between points
+    :return: yields points along line from start to end, separated by distance r
+    """
+    d = dist_between_points_arc(start, end, revol)
+    n_points = int(np.ceil(d / r))
+    center = np.array([revol.x, revol.y])
+    if n_points > 1:
+        for i in range(n_points):
+            next_point = center + rotation_matrix(i / n_points * revol.theta) @ (start - center)
+            yield next_point
 
 
 def es_points_along_line(start, end, r):
@@ -58,6 +93,23 @@ def steer(start, goal, d):
     u = v / (np.sqrt(np.sum(v ** 2)))
     steered_point = start + u * d
     return tuple(steered_point)
+
+
+def sweep(start, goal, revol, q):
+    """
+    Return the farthest point towards goal from start
+    :param start: start location
+    :param goal: goal location
+    :param q: discrete sweeping distance away from start
+    :return: point in the direction of the goal, distance away from start
+    """
+    pts = np.zeros((start.shape[0], 0))
+    center = np.array([revol.x, revol.y])
+    for i in range(len(q)):
+        next_point = center + rotation_matrix(q[i] * revol.theta) @ (start - center)
+        pts = np.concatenate((pts, np.expand_dims(next_point, 0)), axis=1)
+        
+    return pts
 
 
 class Revolute(object):

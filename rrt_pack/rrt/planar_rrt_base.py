@@ -2,11 +2,11 @@ import random
 
 import numpy as np
 
-from src.rrt.tree import Tree
-from src.utilities.geometry import steer
+from rrt_pack.rrt.planar_tree import PlanarTree
+from rrt_pack.utilities.geometry import steer, sweep
 
 
-class RRTBase(object):
+class PlanarRRTBase(object):
     def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01):
         """
         Template RRT planner
@@ -33,7 +33,7 @@ class RRTBase(object):
         """
         Create an empty tree and add to trees
         """
-        self.trees.append(Tree(self.X))
+        self.trees.append(PlanarTree(self.X))
 
     def add_vertex(self, tree, v):
         """
@@ -41,7 +41,7 @@ class RRTBase(object):
         :param tree: int, tree to which to add vertex
         :param v: tuple, vertex to add
         """
-        self.trees[tree].V.insert(0, v + v, v)
+        self.trees[tree].V.insert(v)  # insert a point
         self.trees[tree].V_count += 1  # increment number of vertices in tree
         self.samples_taken += 1  # increment number of samples taken
 
@@ -62,7 +62,7 @@ class RRTBase(object):
         :param n: int, max number of neighbors to return
         :return: list of nearby vertices
         """
-        return self.trees[tree].V.nearest(x, num_results=n, objects="raw")
+        return self.trees[tree].V.nearest(x, n)
 
     def get_nearest(self, tree, x):
         """
@@ -82,12 +82,23 @@ class RRTBase(object):
         """
         x_rand = self.X.sample_free()
         x_nearest = self.get_nearest(tree, x_rand)
-        x_new = self.bound_point(steer(x_nearest, x_rand, q[0]))
+        revol = self.X.pose2steer(x_nearest, x_rand)
+        x_new = sweep(x_nearest, x_rand, revol, q)
+        
         # check if new point is in X_free and not already in V
-        if not self.trees[0].V.count(x_new) == 0 or not self.X.obstacle_free(x_new):
+        feasibility = False
+        feas_index = None
+        for i in range(x_new.shape[1]-1, -1, -1):
+            if self.trees[0].V.count(x_new[:, i]) == 0 and self.X.obstacle_free(x_new[:, i]):
+                feasibility = True
+                feas_index = i
+                break
+        
+        if not feasibility:
             return None, None
+        
         self.samples_taken += 1
-        return x_new, x_nearest
+        return x_new[:, feas_index], x_nearest
 
     def connect_to_point(self, tree, x_a, x_b):
         """

@@ -1,7 +1,7 @@
-from src.rrt.rrt_base import RRTBase
+from rrt_pack.rrt.planar_rrt_base import PlanarRRTBase
 
 
-class RRT(RRTBase):
+class PlanarRRT(PlanarRRTBase):
     def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01):
         """
         Template RRT planner
