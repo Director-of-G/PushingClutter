@@ -20,6 +20,8 @@ class PlanarSearchSpace(object):
         """
         # slider geometry
         self.geom = None
+        self.ab_ratio = None  # the exact value of (a/b) in differential flatness
+        self.miu = None
         self.slider_relcoords = None  # relative coords of vertices in slider frame
         # sanity check
         if len(dimension_lengths) < 2:
@@ -51,6 +53,10 @@ class PlanarSearchSpace(object):
                                           [-geom[0],-geom[1]],  # quad III
                                           [ geom[0],-geom[1]]]) # quadIV
         self.slider_relcoords = self.slider_relcoords.transpose(1, 0)/2
+        
+    def create_slider_dynamics(self, ratio, miu):
+        self.ab_ratio = ratio
+        self.miu = miu
         
     def obstacle_free_base(self, x):
         return self.obs.count(x) == 0
@@ -101,6 +107,67 @@ class PlanarSearchSpace(object):
                 return False
                 
         return True
+    
+    def flatness_free(self, start, end):
+        """
+        Check if a Revolute satisfies differential flatness constraints
+        If true, compute the contact point and force direction
+        :param start: starting pose
+        :param end: ending pose
+        :return: True if Revolute is feasible, and False if Revolute is unfeasible
+        """
+        revol = self.pose2steer(start, end)
+        Xrev = np.array([revol.x, revol.y])
+        Xrev = np.linalg.inv(rotation_matrix(start[2])) @ (Xrev - start[:2])
+        Xc, Yc = Xrev[0] + np.sign(Xrev[0]) * 1e-5, Xrev[1] + np.sign(Xrev[1]) * 1e-5  # ROC coordinates
+        
+        # check feasible contact point on all 4 faces
+        x_lim, y_lim = 0.5 * self.geom[0], 0.5 * self.geom[1]
+        force_dirs, contact_pts = [], []
+        
+        # +X face
+        y0 = (-self.ab_ratio - x_lim * Xc) / Yc
+        if -y_lim <= y0 <= y_lim:
+            contact_pts.append([x_lim, y0])
+            if Yc >= 0:
+                force_dirs.append([-Yc, Xc])
+            else:
+                force_dirs.append([Yc, -Xc])
+        # -X face
+        y0 = (-self.ab_ratio - (-x_lim) * Xc) / Yc
+        if -y_lim <= y0 <= y_lim:
+            contact_pts.append([-x_lim, y0])
+            if Yc >= 0:
+                force_dirs.append([Yc, -Xc])
+            else:
+                force_dirs.append([-Yc, Xc])
+        # +Y face
+        x0 = (-self.ab_ratio - y_lim * Yc) / Xc
+        if -x_lim <= x0 <= x_lim:
+            contact_pts.append([x0, y_lim])
+            if Xc >= 0:
+                force_dirs.append([Yc, -Xc])
+            else:
+                force_dirs.append([-Yc, Xc])
+        # -Y face
+        x0 = (-self.ab_ratio - (-y_lim) * Yc) / Xc
+        if -x_lim <= x0 <= x_lim:
+            contact_pts.append([x0, -y_lim])
+            if Xc >= 0:
+                force_dirs.append([-Yc, Xc])
+            else:
+                force_dirs.append([Yc, -Xc])
+            
+        if len(contact_pts) > 0:
+            contact_pts = np.array(contact_pts).T
+            force_dirs = np.array(force_dirs).T
+            if len(contact_pts.shape) == 1:
+                contact_pts = np.expand_dims(contact_pts, axis=1).T
+                force_dirs = np.expand_dims(force_dirs, axis=1).T
+            force_dirs = force_dirs / np.linalg.norm(force_dirs, ord=2, axis=0)  # normalization
+            return True, force_dirs, contact_pts
+        else:
+            return False, None, None
 
     def pose2steer(self, start, end):
         """
@@ -163,6 +230,7 @@ if __name__ == '__main__':
                           (0.15, 0.15, 0.45, 0.35)])
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=[0.07, 0.12])
+    X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
     
     from matplotlib import pyplot as plt
     
@@ -243,7 +311,9 @@ if __name__ == '__main__':
         revol = X.pose2steer(slider1, slider2)
         pt_set1, pt_set2 = X.point_pairs(slider1, slider2)
         
-        if X.collision_free(slider1, slider2, 0.01):
+        # check differential flatness constraints
+        flat_feas, force_dirs, contact_pts = X.flatness_free(slider1, slider2)
+        if X.collision_free(slider1, slider2, 0.01) and flat_feas:
             try:
                 print(pt_set1.shape)
 
@@ -276,6 +346,16 @@ if __name__ == '__main__':
                                 break
                         arc_points = np.array(arc_points)
                         plt.scatter(arc_points[:, 0], arc_points[:, 1], color='deepskyblue')
+                
+                # plot contact point
+                contact_pts = np.expand_dims(slider1[:2], axis=1) + rotation_matrix(slider1[2]) @ contact_pts
+                plt.scatter(contact_pts[0, :], contact_pts[1, :])
+                
+                # plot contact force axis
+                for i in range(force_dirs.shape[1]):
+                    arrow = 0.035 * rotation_matrix(slider1[2]) @ force_dirs[:, i]
+                    plt.arrow(contact_pts[0, i], contact_pts[1, i], arrow[0], arrow[1])
+                
                 plt.gca().set_aspect('equal')
                 plt.show()
             except:

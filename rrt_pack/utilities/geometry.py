@@ -5,6 +5,8 @@ from itertools import tee
 
 import numpy as np
 
+from rrt_pack.utilities.math import angle_clip
+
 
 def rotation_matrix(theta):
     return np.array([[np.cos(theta), -np.sin(theta)],
@@ -105,10 +107,14 @@ def sweep(start, goal, revol, q):
     :param q: discrete sweeping distance away from start
     :return: point in the direction of the goal, distance away from start
     """
+    if type(start) is np.ndarray and len(start.shape) == 2:
+        start = start.squeeze()
     pts = np.zeros((len(start), 0))
     center = np.array([revol.x, revol.y])
     for i in range(len(q)):
-        next_point = center + rotation_matrix(q[i] * revol.theta) @ (start - center)
+        next_point = center + rotation_matrix(q[i] * revol.theta) @ (start[:2] - center)
+        next_yaw = angle_clip(start[2] + q[i] * revol.theta)
+        next_point = np.concatenate((next_point, [next_yaw]), axis=0)
         pts = np.concatenate((pts, np.expand_dims(next_point, 1)), axis=1)
         
     return pts

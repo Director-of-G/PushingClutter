@@ -1,5 +1,5 @@
 import numpy as np
-from rrt_pack.utilities.math import get_k_min
+from rrt_pack.utilities.math import get_arg_k_min
 
 class PlanarIndex(object):
     def __init__(self, weights) -> None:
@@ -27,7 +27,7 @@ class PlanarIndex(object):
         return dist
     
     def nearest(self, pt, k):
-        idx = get_k_min(self.dist(pt), k)
+        idx = get_arg_k_min(self.dist(pt), k)
         pts = self.data[:, idx.tolist()]
         for i in range(pts.shape[1]):
             yield tuple(pts[:, i])

@@ -20,7 +20,14 @@ def get_k_max(array, k):
     _k_sort = np.argpartition(array, -k)[-k:]  # 最大的k个数据的下标
     return array[_k_sort]
 
-
 def get_k_min(array, k):
-    _k_sort = np.argpartition(array, k)[:k]  # 最小的k个数据的下标
+    _k_sort = np.argpartition(array, min(k, array.shape[0] - 1))[:k]  # 最小的k个数据的下标
     return array[_k_sort]
+
+def get_arg_k_max(array, k):
+    _k_sort = np.argpartition(array, -k)[-k:]  # 最大的k个数据的下标
+    return _k_sort
+
+def get_arg_k_min(array, k):
+    _k_sort = np.argpartition(array, min(k, array.shape[0] - 1))[:k]  # 最小的k个数据的下标
+    return _k_sort
