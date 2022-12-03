@@ -5,7 +5,16 @@ import numpy as np
 
 
 def angle_clip(angle):
+    # hard clip angle to [-pi, pi]
     return np.clip(angle, -np.pi, np.pi)
+
+def angle_limit(angle):
+    # soft limit yaw angle to [-pi, pi]
+    if angle > np.pi:
+        angle = 2 * np.pi - angle
+    elif angle < -np.pi:
+        angle = 2 * np.pi + angle
+    return angle
 
 def get_k_max(array, k):
     _k_sort = np.argpartition(array, -k)[-k:]  # 最大的k个数据的下标

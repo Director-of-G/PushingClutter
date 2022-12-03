@@ -6,7 +6,7 @@ from rtree import index
 
 import sys
 sys.path.append('../../')
-from rrt_pack.utilities.math import angle_clip
+from rrt_pack.utilities.math import angle_limit
 from rrt_pack.utilities.geometry import es_points_along_line, es_points_along_arc, Revolute, rotation_matrix
 from rrt_pack.utilities.obstacle_generation import obstacle_generator
 
@@ -88,7 +88,7 @@ class PlanarSearchSpace(object):
         :return: True if line segment does not intersect an obstacle, False otherwise
         """
         revol = self.pose2steer(start, end)
-        pt_set1, pt_set2 = self.point_pairs(self, start, end)
+        pt_set1, pt_set2 = self.point_pairs(start, end)
         
         # check arc collision
         for i in range(pt_set1.shape[1]):
@@ -111,21 +111,23 @@ class PlanarSearchSpace(object):
         """
         p_start, p_end = np.zeros((2, 2)), np.zeros((2, 2))
         p_start[0, :], p_end[0, :] = start[:2], end[:2]
-        p_start[1, :] = start[:2] + np.array([np.cos(start[2]), np.sin(start[2])])
-        p_end[1, :] = end[:2] + np.array([np.cos(end[2]), np.sin(end[2])])
-        # A = 2 * (p_start - p_end)
-        # b = np.sum(np.power(p_end, 2) - np.power(p_start, 2), axis=1)
-        A = np.array([[p_start[1, 1] - p_start[0, 1], p_start[0, 0] - p_start[1, 0]],
-                      [p_end[1, 1] - p_end[0, 1], p_end[0, 0] - p_end[1, 0]]])
-        b = np.array([[np.linalg.det(p_start)],
-                      [np.linalg.det(p_end)]])
+        p_start[1, :] = start[:2] + np.array([np.cos(start[2]), np.sin(start[2])]) * self.geom[0] * 0.5
+        p_end[1, :] = end[:2] + np.array([np.cos(end[2]), np.sin(end[2])]) * self.geom[0] * 0.5
+        # p_center = np.concatenate((np.expand_dims(p_start[0, :], 0), np.expand_dims(p_end[0, :], 0)), axis=0)
+        # p_bound = np.concatenate((np.expand_dims(p_start[1, :], 0), np.expand_dims(p_end[1, :], 0)), axis=0)
+        A = 2 * (p_end - p_start)
+        b = np.sum(np.power(p_end, 2) - np.power(p_start, 2), axis=1)
+        # A = np.array([[p_end[0, 1] - p_start[0, 1], p_start[0, 0] - p_end[0, 0]],
+        #               [p_end[1, 1] - p_start[1, 1], p_start[1, 0] - p_end[1, 0]]])
+        # b = np.array([[p_start[0, 0] * p_end[0, 1] - p_end[0, 0] * p_start[0, 1]],
+        #               [p_start[1, 0] * p_end[1, 1] - p_end[1, 0] * p_start[1, 1]]])
 
         if np.linalg.matrix_rank(A) < 2:
             revol = Revolute(finite=False, x=0, y=0, theta=0)
         else:
             center = np.linalg.inv(A) @ b
-            theta = angle_clip(end[2] - start[2])
-            revol = Revolute(finite=False, x=center[0], y=center[1], theta=theta)
+            theta = angle_limit(end[2] - start[2])
+            revol = Revolute(finite=True, x=center[0], y=center[1], theta=theta)
 
         return revol
     
@@ -198,6 +200,7 @@ if __name__ == '__main__':
     """
     
     # check pose2steer
+    """
     while True:
         boundary = np.array([[0.05, 0.05], [0.45, 0.05], [0.45, 0.15], [0.15, 0.15], \
                             [0.15, 0.35], [0.45, 0.35], [0.45, 0.45], [0.05, 0.45], \
@@ -225,3 +228,55 @@ if __name__ == '__main__':
         
         plt.gca().set_aspect('equal')
         plt.show()
+    """
+
+    # check collision free
+    while True:            
+        slider1 = X.sample_free()
+        ptr_set1 = np.expand_dims(slider1[:2], axis=1) + rotation_matrix(slider1[2]) @ X.slider_relcoords
+        ptr_set1 = np.concatenate((ptr_set1, np.expand_dims(ptr_set1[:, 0], 1)), axis=1).T
+        
+        slider2 = X.sample_free()
+        ptr_set2 = np.expand_dims(slider2[:2], axis=1) + rotation_matrix(slider2[2]) @ X.slider_relcoords
+        ptr_set2 = np.concatenate((ptr_set2, np.expand_dims(ptr_set2[:, 0], 1)), axis=1).T
+
+        revol = X.pose2steer(slider1, slider2)
+        pt_set1, pt_set2 = X.point_pairs(slider1, slider2)
+        
+        if X.collision_free(slider1, slider2, 0.01):
+            try:
+                print(pt_set1.shape)
+
+                # plot Cfree boundary
+                boundary = np.array([[0.05, 0.05], [0.45, 0.05], [0.45, 0.15], [0.15, 0.15], \
+                                    [0.15, 0.35], [0.45, 0.35], [0.45, 0.45], [0.05, 0.45], \
+                                    [0.05, 0.05]])
+                plt.plot(boundary[:, 0], boundary[:, 1])
+
+                # plot orientation arrow 1
+                arrow1 = rotation_matrix(slider1[2]) @ np.array([1., 0.])
+                arrow1 = 0.035 * arrow1 / np.linalg.norm(arrow1, ord=2)
+                plt.arrow(slider1[0], slider1[1], arrow1[0], arrow1[1])
+                plt.plot(ptr_set1[:, 0], ptr_set1[:, 1], color='red')
+
+                # plot orientation arrow 2
+                arrow2 = rotation_matrix(slider2[2]) @ np.array([1., 0.])
+                arrow2 = 0.035 * arrow2 / np.linalg.norm(arrow2, ord=2)
+                plt.arrow(slider2[0], slider2[1], arrow2[0], arrow2[1])
+                plt.plot(ptr_set2[:, 0], ptr_set2[:, 1], color='orange')
+
+                for i in range(pt_set1.shape[1]):
+                    if revol.finite == True:
+                        points = es_points_along_arc(pt_set1[:, i], pt_set2[:, i], 0.01, revol)
+                        arc_points = []
+                        while True:
+                            try:
+                                arc_points.append(list(next(points)))
+                            except:
+                                break
+                        arc_points = np.array(arc_points)
+                        plt.scatter(arc_points[:, 0], arc_points[:, 1], color='deepskyblue')
+                plt.gca().set_aspect('equal')
+                plt.show()
+            except:
+                import pdb; pdb.set_trace()

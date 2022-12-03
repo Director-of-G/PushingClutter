@@ -89,7 +89,7 @@ class PlanarRRTBase(object):
         feasibility = False
         feas_index = None
         for i in range(x_new.shape[1]-1, -1, -1):
-            if self.trees[0].V.count(x_new[:, i]) == 0 and self.X.obstacle_free(x_new[:, i]):
+            if self.trees[tree].V.count(x_new[:, i]) == 0 and self.X.obstacle_free(x_new[:, i]):
                 feasibility = True
                 feas_index = i
                 break
@@ -98,7 +98,7 @@ class PlanarRRTBase(object):
             return None, None
         
         self.samples_taken += 1
-        return x_new[:, feas_index], x_nearest
+        return tuple(x_new[:, feas_index]), x_nearest
 
     def connect_to_point(self, tree, x_a, x_b):
         """

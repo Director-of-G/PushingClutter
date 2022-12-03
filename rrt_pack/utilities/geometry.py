@@ -20,7 +20,7 @@ def dist_between_points_arc(a, b, revol):
     """
     center = np.array([revol.x, revol.y])
     radius = np.linalg.norm(a - center, ord=2)
-    distance = radius * revol.theta
+    distance = np.abs(radius * revol.theta)
     return distance
 
 
@@ -55,11 +55,13 @@ def es_points_along_arc(start, end, r, revol):
     :return: yields points along line from start to end, separated by distance r
     """
     d = dist_between_points_arc(start, end, revol)
-    n_points = int(np.ceil(d / r))
+    n_points = max(int(np.ceil(d / r)), 10)
     center = np.array([revol.x, revol.y])
     if n_points > 1:
         for i in range(n_points):
             next_point = center + rotation_matrix(i / n_points * revol.theta) @ (start - center)
+            if type(next_point) is not tuple:
+                next_point = tuple(next_point.squeeze())
             yield next_point
 
 
@@ -103,11 +105,11 @@ def sweep(start, goal, revol, q):
     :param q: discrete sweeping distance away from start
     :return: point in the direction of the goal, distance away from start
     """
-    pts = np.zeros((start.shape[0], 0))
+    pts = np.zeros((len(start), 0))
     center = np.array([revol.x, revol.y])
     for i in range(len(q)):
         next_point = center + rotation_matrix(q[i] * revol.theta) @ (start - center)
-        pts = np.concatenate((pts, np.expand_dims(next_point, 0)), axis=1)
+        pts = np.concatenate((pts, np.expand_dims(next_point, 1)), axis=1)
         
     return pts
 
