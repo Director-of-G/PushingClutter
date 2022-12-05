@@ -109,6 +109,9 @@ class PlanarRRTBase(object):
         :return: bool, True if able to add edge, False if prohibited by an obstacle
         """
         if self.trees[tree].V.count(x_b) == 0 and self.X.collision_free(x_a, x_b, self.r):
+            flat_feas, _, _ = self.X.flatness_free(x_a, x_b)
+            if not flat_feas:
+                return False
             self.add_vertex(tree, x_b)
             self.add_edge(tree, x_b, x_a)
             return True

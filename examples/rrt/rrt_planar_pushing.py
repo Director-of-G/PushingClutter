@@ -25,14 +25,22 @@ max_samples = 1024  # max number of samples to take before timing out
 prc = 0.1  # probability of checking for a connection to goal
 
 # create search space
+miu = 0.2
+ab_ratio = 1 / 726.136
 X = PlanarSearchSpace(X_dimensions, Obstacles)
 X.create_slider_geometry(geom=slider_geom)
+X.create_slider_dynamics(ratio=ab_ratio, miu=miu)
 
 # create rrt_search
 rrt = PlanarRRT(X, Q, x_init, x_goal, max_samples, r, prc)
 path = rrt.rrt_search()
 
-dic = {'obstacles': Obstacles,
+base_info = {'geom': slider_geom,
+             'ab_ratio': ab_ratio,
+             'miu': miu,
+             'x_dims': X_dimensions}
+dic = {'base_info': base_info,
+       'obstacles': Obstacles,
        'path': np.array(path)}
 
 file = open(r'../../output/data/rrt_planar_pushing.pkl', 'wb')

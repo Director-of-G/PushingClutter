@@ -120,6 +120,7 @@ class PlanarSearchSpace(object):
         Xrev = np.array([revol.x, revol.y])
         Xrev = np.linalg.inv(rotation_matrix(start[2])) @ (Xrev - start[:2])
         Xc, Yc = Xrev[0] + np.sign(Xrev[0]) * 1e-5, Xrev[1] + np.sign(Xrev[1]) * 1e-5  # ROC coordinates
+        Kc = Yc / Xc
         
         # check feasible contact point on all 4 faces
         x_lim, y_lim = 0.5 * self.geom[0], 0.5 * self.geom[1]
@@ -127,7 +128,7 @@ class PlanarSearchSpace(object):
         
         # +X face
         y0 = (-self.ab_ratio - x_lim * Xc) / Yc
-        if -y_lim <= y0 <= y_lim:
+        if (-y_lim <= y0 <= y_lim) and (Kc <= -1 / self.miu or Kc >= 1 / self.miu):
             contact_pts.append([x_lim, y0])
             if Yc >= 0:
                 force_dirs.append([-Yc, Xc])
@@ -135,7 +136,7 @@ class PlanarSearchSpace(object):
                 force_dirs.append([Yc, -Xc])
         # -X face
         y0 = (-self.ab_ratio - (-x_lim) * Xc) / Yc
-        if -y_lim <= y0 <= y_lim:
+        if (-y_lim <= y0 <= y_lim) and (Kc <= -1 / self.miu or Kc >= 1 / self.miu):
             contact_pts.append([-x_lim, y0])
             if Yc >= 0:
                 force_dirs.append([Yc, -Xc])
@@ -143,7 +144,7 @@ class PlanarSearchSpace(object):
                 force_dirs.append([-Yc, Xc])
         # +Y face
         x0 = (-self.ab_ratio - y_lim * Yc) / Xc
-        if -x_lim <= x0 <= x_lim:
+        if (-x_lim <= x0 <= x_lim) and (-self.miu <= Kc <= self.miu):
             contact_pts.append([x0, y_lim])
             if Xc >= 0:
                 force_dirs.append([Yc, -Xc])
@@ -151,7 +152,7 @@ class PlanarSearchSpace(object):
                 force_dirs.append([-Yc, Xc])
         # -Y face
         x0 = (-self.ab_ratio - (-y_lim) * Yc) / Xc
-        if -x_lim <= x0 <= x_lim:
+        if (-x_lim <= x0 <= x_lim) and (-self.miu <= Kc <= self.miu):
             contact_pts.append([x0, -y_lim])
             if Xc >= 0:
                 force_dirs.append([-Yc, Xc])

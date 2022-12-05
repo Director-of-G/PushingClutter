@@ -93,14 +93,15 @@ class PlanarPlot(object):
             plt.plot(all_ptrs[i, :, 0], all_ptrs[i, :, 1], color='red')
             
         # plot contact point and force directions
-        for i in range(self.path.shape[0]):
+        for i in range(self.path.shape[0] - 1):
             # plot contact point
-            contact_pt = self.path[i, :2] + rotation_matrix(self.path[2]) @ pts[:, i]
-            plt.scatter(contact_pt[0], contact_pt[1])
+            # import pdb; pdb.set_trace()
+            contact_pt = self.path[i, :2] + rotation_matrix(self.path[i, 2]) @ pts[:, i]
+            plt.scatter(contact_pt[0], contact_pt[1], color='deepskyblue')
             
             # plot contact force axis
-            arrow = 0.035 * rotation_matrix(self.path[2]) @ dir[:, i]
-            plt.arrow(contact_pt[0], contact_pt[1], arrow[0], arrow[1])
+            arrow = 0.035 * rotation_matrix(self.path[i, 2]) @ dirs[:, i]
+            plt.arrow(contact_pt[0], contact_pt[1], arrow[0], arrow[1], color='deepskyblue')
         
         plt.xlim([0.0, 0.5])
         plt.ylim([0.0, 0.5])
@@ -120,6 +121,7 @@ if __name__ == '__main__':
     
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=slider_geom)
+    X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
     plot = PlanarPlot(filename='rrt_planar_pushing',
                       X=X)
     plot.load_result_file()
