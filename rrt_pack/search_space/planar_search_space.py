@@ -4,8 +4,6 @@
 import numpy as np
 from rtree import index
 
-import sys
-sys.path.append('../../')
 from rrt_pack.utilities.math import angle_limit
 from rrt_pack.utilities.geometry import es_points_along_line, es_points_along_arc, Revolute, rotation_matrix
 from rrt_pack.utilities.obstacle_generation import obstacle_generator

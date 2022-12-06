@@ -9,7 +9,7 @@ print(find_packages())
 setup(
     name='rrt_pack',
     version='1.0',
-    url='https://github.com/motion-planning/rrt-algorithms.git',
+    url='https://github.com/Director-of-G/rrt-algorithms.git',
     author='SZanlongo and Tahsincan Köse',
     license='Apache v2.0',
     packages=find_packages(),
