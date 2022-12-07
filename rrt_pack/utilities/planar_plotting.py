@@ -128,7 +128,7 @@ if __name__ == '__main__':
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=slider_geom)
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
-    plot = PlanarPlot(filename='rrt_planar_pushing_test',
+    plot = PlanarPlot(filename='rrt_planar_pushing',
                       X=X)
     plot.load_result_file()
     plot.plot_rrt_result()

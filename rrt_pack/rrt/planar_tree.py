@@ -26,8 +26,8 @@ class PlanarIndex(object):
         
         return dist
     
-    def nearest(self, pt, k):
-        idx = get_arg_k_min(self.dist(pt), k)
+    def nearest(self, pt, num_results):
+        idx = get_arg_k_min(self.dist(pt), num_results)
         pts = self.data[:, idx.tolist()]
         for i in range(pts.shape[1]):
             yield tuple(pts[:, i])

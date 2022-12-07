@@ -5,7 +5,7 @@ from itertools import tee
 
 import numpy as np
 
-from rrt_pack.utilities.math import angle_clip
+from rrt_pack.utilities.math import angle_clip, angle_limit
 
 
 def rotation_matrix(theta):
@@ -34,6 +34,27 @@ def dist_between_points(a, b):
     :return: Euclidean distance between a and b
     """
     distance = np.linalg.norm(np.array(b) - np.array(a))
+    return distance
+
+
+def planar_dist_between_points(a, b, w):
+    """
+    Return the Euclidean distance between two points
+    :param a: first point
+    :param b: second point
+    :param w: weights for each dimension
+    :return: Weighted-sum distance between a and b
+    """
+    if type(a) is not np.ndarray:
+        a = np.array(a)
+    if type(b) is not np.ndarray:
+        b = np.array(b)
+    diff = a - b
+    if diff[2] > np.pi:
+        diff[2] = 2 * np.pi - diff[2]
+    elif diff[2] < -np.pi:
+        diff[2] = 2 * np.pi + diff[2]
+    distance = np.sqrt(w[0] * diff[0] ** 2 + w[1] * diff[1] ** 2 + w[2] * diff[2] ** 2)
     return distance
 
 
@@ -99,6 +120,7 @@ def steer(start, goal, d):
     return tuple(steered_point)
 
 
+# TODO: ANGLE_CLIP IS OF NO USE
 def sweep(start, goal, revol, q):
     """
     Return the farthest point towards goal from start

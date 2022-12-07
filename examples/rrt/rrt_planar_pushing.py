@@ -6,6 +6,7 @@ import pickle
 import sys
 sys.path.append('../../')
 from rrt_pack.rrt.planar_rrt import PlanarRRT
+from rrt_pack.rrt.planar_rrt_star import PlanarRRTStar
 from rrt_pack.search_space.planar_search_space import PlanarSearchSpace
 from rrt_pack.utilities.plotting import Plot
 
@@ -20,9 +21,11 @@ x_goal = (0.38, 0.40, -np.pi / 2)  # goal location
 slider_geom = [0.07, 0.12]
 
 Q = np.arange(0.1, 1.1, 0.1)  # length of tree edges
-r = 1  # length of smallest edge to check for intersection with obstacles
-max_samples = 1024  # max number of samples to take before timing out
+r = 0.001  # length of smallest edge to check for intersection with obstacles
+max_samples = 8192  # max number of samples to take before timing out
 prc = 0.1  # probability of checking for a connection to goal
+
+rewire_count = 32  # optional, number of nearby branches to rewire
 
 # create search space
 miu = 0.2
@@ -32,7 +35,8 @@ X.create_slider_geometry(geom=slider_geom)
 X.create_slider_dynamics(ratio=ab_ratio, miu=miu)
 
 # create rrt_search
-rrt = PlanarRRT(X, Q, x_init, x_goal, max_samples, r, prc)
+# rrt = PlanarRRT(X, Q, x_init, x_goal, max_samples, r, prc)
+rrt = PlanarRRTStar(X, Q, x_init, x_goal, max_samples, r, prc)
 path = rrt.rrt_search()
 
 base_info = {'geom': slider_geom,

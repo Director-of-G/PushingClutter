@@ -14,6 +14,7 @@ class PlanarRRT(PlanarRRTBase):
         :param prc: probability of checking whether there is a solution
         """
         super().__init__(X, Q, x_init, x_goal, max_samples, r, prc)
+        print('Using method {0}!'.format('PlanarRRT'))
 
     def rrt_search(self):
         """

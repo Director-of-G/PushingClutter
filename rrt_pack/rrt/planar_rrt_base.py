@@ -62,7 +62,7 @@ class PlanarRRTBase(object):
         :param n: int, max number of neighbors to return
         :return: list of nearby vertices
         """
-        return self.trees[tree].V.nearest(x, n)
+        return self.trees[tree].V.nearest(x, num_results=n)
 
     def get_nearest(self, tree, x):
         """
@@ -109,7 +109,7 @@ class PlanarRRTBase(object):
         :return: bool, True if able to add edge, False if prohibited by an obstacle
         """
         if self.trees[tree].V.count(x_b) == 0 and self.X.collision_free(x_a, x_b, self.r):
-            flat_feas, _, _ = self.X.flatness_free(x_a, x_b)
+            flat_feas, _, _ = self.X.flatness_free(x_a, x_b)  # check feasibility based on differential flatness
             if not flat_feas:
                 return False
             self.add_vertex(tree, x_b)
