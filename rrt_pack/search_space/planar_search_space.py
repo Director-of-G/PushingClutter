@@ -120,6 +120,9 @@ class PlanarSearchSpace(object):
         Xc, Yc = Xrev[0] + np.sign(Xrev[0]) * 1e-5, Xrev[1] + np.sign(Xrev[1]) * 1e-5  # ROC coordinates
         Kc = Yc / Xc
         
+        # forwarding direction
+        forward_dir = rotation_matrix(start[2]).T @ (np.array(end[:2]) - np.array(start[:2]))
+        
         # check feasible contact point on all 4 faces
         x_lim, y_lim = 0.5 * self.geom[0], 0.5 * self.geom[1]
         force_dirs, contact_pts = [], []
@@ -156,15 +159,15 @@ class PlanarSearchSpace(object):
                 force_dirs.append([-Yc, Xc])
             else:
                 force_dirs.append([Yc, -Xc])
+        
+        # the pusher's contact force and the slider's forwarding direction keeps acute angle
+        idx = np.where((np.array(force_dirs).reshape(-1, 2) @ forward_dir) > 0)[0]
             
-        if len(contact_pts) > 0:
+        if len(idx) > 0:
             contact_pts = np.array(contact_pts).T
             force_dirs = np.array(force_dirs).T
-            if len(contact_pts.shape) == 1:
-                contact_pts = np.expand_dims(contact_pts, axis=1).T
-                force_dirs = np.expand_dims(force_dirs, axis=1).T
             force_dirs = force_dirs / np.linalg.norm(force_dirs, ord=2, axis=0)  # normalization
-            return True, force_dirs, contact_pts
+            return True, force_dirs[:, idx], contact_pts[:, idx]
         else:
             return False, None, None
 

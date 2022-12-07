@@ -1,7 +1,7 @@
 import numpy as np
 import pickle
 
-from rrt_pack.utilities.geometry import dist_between_points_arc
+from rrt_pack.utilities.geometry import dist_between_points_arc, rotation_matrix
 
 from rrt_pack.search_space.planar_search_space import PlanarSearchSpace
 
@@ -52,11 +52,13 @@ class KinoPlanData(object):
         dubins = np.zeros((0, 5))
         path_len = np.zeros((0, 1))
         for i in range(len(self.path) - 1):
+            import pdb; pdb.set_trace()
             pose_now, pose_next = self.path[i], self.path[i + 1]
             _, dir, pt = X.flatness_free(start=pose_now,
                                          end=pose_next)
             # keep the direction that pushes the slider forward
-            idx = np.argmax(dir.T @ (pose_next[:2] - pose_now[:2]))
+            rot_mat = rotation_matrix(pose_now[2])
+            idx = np.argmax(dir.T @ rot_mat.T @ (pose_next[:2] - pose_now[:2]))
             dirs = np.concatenate((dirs, np.expand_dims(dir[:, idx], axis=0)), axis=0)
             pts = np.concatenate((pts, np.expand_dims(pt[:, idx], axis=0)), axis=0)
             # dubins parameters
@@ -86,6 +88,6 @@ class KinoPlanData(object):
     
     
 if __name__ == '__main__':
-    plan_data = KinoPlanData(filename="rrt_planar_pushing_change1")
+    plan_data = KinoPlanData(filename="rrt_planar_pushing_test")
     data = plan_data.data_packer()
     import pdb; pdb.set_trace()

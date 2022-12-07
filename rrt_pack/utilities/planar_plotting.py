@@ -12,6 +12,12 @@ from rrt_pack.utilities.geometry import rotation_matrix
 
 colors = ['darkblue', 'teal']
 
+def plot_obstacles(ax, Obstacles):
+    for i in range(len(Obstacles)):
+        x1, y1, x2, y2 = Obstacles[i]
+        width, height = x2 - x1, y2 - y1
+        rect = plt.Rectangle((x1, y1), width, height, color='grey')
+        ax.add_patch(rect)
 
 class PlanarPlot(object):
     def __init__(self, filename, X):
@@ -62,7 +68,7 @@ class PlanarPlot(object):
         for i in range(len(self.path) - 1):
             _, force_dir, contact_pt = self.X.flatness_free(self.path[i], self.path[i + 1])
             # check the feasible force direction that push the slider forward
-            forward_dir = np.linalg.inv(rotation_matrix(self.path[i, 2])) @ (self.path[i + 1, :2] - self.path[i, :2])
+            forward_dir = rotation_matrix(self.path[i, 2]).T @ (self.path[i + 1, :2] - self.path[i, :2])
             idx = np.argmax(force_dir.T @ forward_dir)
             dirs = np.concatenate((dirs, np.expand_dims(force_dir[:, idx], axis=1)), axis=1)
             pts = np.concatenate((pts, np.expand_dims(contact_pt[:, idx], axis=1)), axis=1)
@@ -122,7 +128,7 @@ if __name__ == '__main__':
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=slider_geom)
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
-    plot = PlanarPlot(filename='rrt_planar_pushing_change1',
+    plot = PlanarPlot(filename='rrt_planar_pushing_test',
                       X=X)
     plot.load_result_file()
     plot.plot_rrt_result()
