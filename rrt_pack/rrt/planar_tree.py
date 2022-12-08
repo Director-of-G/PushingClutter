@@ -43,6 +43,7 @@ class PlanarTree(object):
         :param X: Search Space
         """
         weights = [1, 1, np.linalg.norm(X.geom, ord=2)/2]
+        self.weights = weights
         self.V = PlanarIndex(weights)  # vertices in an rtree
         self.V_count = 0
         self.E = {}  # edges in form E[child] = parent

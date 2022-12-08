@@ -4,7 +4,7 @@
 import numpy as np
 from rtree import index
 
-from rrt_pack.utilities.math import angle_limit
+from rrt_pack.utilities.math import angle_limit, angle_diff
 from rrt_pack.utilities.geometry import es_points_along_line, es_points_along_arc, Revolute, rotation_matrix
 from rrt_pack.utilities.obstacle_generation import obstacle_generator
 
@@ -21,6 +21,7 @@ class PlanarSearchSpace(object):
         self.ab_ratio = None  # the exact value of (a/b) in differential flatness
         self.miu = None
         self.slider_relcoords = None  # relative coords of vertices in slider frame
+        self.X_dimensions = dimension_lengths
         # sanity check
         if len(dimension_lengths) < 2:
             raise Exception("Must have at least 2 dimensions")
@@ -82,7 +83,17 @@ class PlanarSearchSpace(object):
             x = self.sample()
             if self.obstacle_free(x):
                 return x
-
+            
+    def sample_collision(self):
+        """
+        Sample a location outside X_free
+        :return: random location outside X_free
+        """
+        while True:
+            x = self.sample()
+            if not self.obstacle_free(x):
+                return x
+    
     def collision_free(self, start, end, r):
         """
         Check if a line segment intersects an obstacle
@@ -195,7 +206,8 @@ class PlanarSearchSpace(object):
             revol = Revolute(finite=False, x=0, y=0, theta=0)
         else:
             center = np.linalg.inv(A) @ b
-            theta = angle_limit(end[2] - start[2])
+            # theta = angle_limit(end[2] - start[2])
+            theta = angle_diff(start[2], end[2])
             revol = Revolute(finite=True, x=center[0], y=center[1], theta=theta)
 
         return revol
@@ -301,6 +313,7 @@ if __name__ == '__main__':
     """
 
     # check collision free
+    """
     while True:            
         slider1 = X.sample_free()
         ptr_set1 = np.expand_dims(slider1[:2], axis=1) + rotation_matrix(slider1[2]) @ X.slider_relcoords
@@ -362,3 +375,19 @@ if __name__ == '__main__':
                 plt.show()
             except:
                 import pdb; pdb.set_trace()
+    """
+    
+    # sample poses in X_collision
+    sample_num = 8000
+    collision_pts = []
+    for i in range(sample_num):
+        sample = X.sample_collision()
+        collision_pts.append(sample)
+    np.save('../../output/data/X_collision.npy', collision_pts)
+    # sample poses in X_free
+    sample_num = 2000
+    free_pts = []
+    for i in range(sample_num):
+        sample = X.sample_free()
+        free_pts.append(sample)
+    np.save('../../output/data/X_free.npy', free_pts)

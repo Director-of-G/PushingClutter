@@ -26,7 +26,7 @@ X = SearchSpace(X_dimensions, Obstacles)
 rrt = RRT(X, Q, x_init, x_goal, max_samples, r, prc)
 path = rrt.rrt_search()
 
-# plot
+# plot rrt tree
 plot = Plot("rrt_3d")
 plot.plot_tree(X, rrt.trees)
 if path is not None:

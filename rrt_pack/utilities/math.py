@@ -16,6 +16,17 @@ def angle_limit(angle):
         angle = 2 * np.pi + angle
     return angle
 
+def angle_diff(angle1, angle2):
+    # calculate the difference between two angles ∈ [-pi, pi]
+    diff1 = angle2 - angle1
+    diff2 = 2 * np.pi - np.abs(diff1)
+    if diff1 > 0:
+        diff2 = -diff2
+    if np.abs(diff1) < np.abs(diff2):
+        return diff1
+    else:
+        return diff2
+
 def get_k_max(array, k):
     _k_sort = np.argpartition(array, -k)[-k:]  # 最大的k个数据的下标
     return array[_k_sort]

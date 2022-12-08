@@ -53,9 +53,10 @@ class PlanarRRTStar(PlanarRRT):
         :return:
         """
         for c_near, x_near in L_near:
-            curr_cost = planar_path_cost(self.trees[tree].E, self.x_init, x_near)
-            tent_cost = planar_path_cost(self.trees[tree].E, self.x_init, x_new) + planar_segment_cost(x_new, x_near)
-            if tent_cost < curr_cost and self.X.collision_free(x_near, x_new, self.r):
+            curr_cost = planar_path_cost(self.trees[tree].E, self.x_init, x_near, self.trees[tree].weights)
+            tent_cost = planar_path_cost(self.trees[tree].E, self.x_init, x_new, self.trees[tree].weights) + planar_segment_cost(x_new, x_near, self.trees[tree].weights)
+            if tent_cost < curr_cost and self.X.collision_free(x_near, x_new, self.r) and self.X.flatness_free(x_near, x_new)[0] is True:
+                # print('Rewire occurance')
                 self.trees[tree].E[x_near] = x_new
 
     def connect_shortest_valid(self, tree, x_new, L_near):
@@ -67,7 +68,7 @@ class PlanarRRTStar(PlanarRRT):
         """
         # check nearby vertices for total cost and connect shortest valid edge
         for c_near, x_near in L_near:
-            if c_near + planar_cost_to_go(x_near, self.x_goal) < self.c_best and self.connect_to_point(tree, x_near, x_new):
+            if c_near + planar_cost_to_go(x_near, self.x_goal, self.trees[tree].weights) < self.c_best and self.connect_to_point(tree, x_near, x_new):
                 break
 
     def current_rewire_count(self, tree):
@@ -93,22 +94,25 @@ class PlanarRRTStar(PlanarRRT):
         self.add_edge(0, self.x_init, None)
 
         while True:
-            for q in self.Q:  # iterate over different edge lengths
-                for i in range(q[1]):  # iterate over number of edges of given length to add
-                    x_new, x_nearest = self.new_and_near(0, q)
-                    if x_new is None:
-                        continue
+            x_new, x_nearest = self.new_and_near(0, self.Q)
+            
+            if x_new is None:
+                continue
 
-                    # get nearby vertices and cost-to-come
-                    L_near = self.get_nearby_vertices(0, self.x_init, x_new)
+            # get nearby vertices and cost-to-come
+            # import pdb; pdb.set_trace()
+            L_near = self.get_nearby_vertices(0, self.x_init, x_new)
 
-                    # check nearby vertices for total cost and connect shortest valid edge
-                    self.connect_shortest_valid(0, x_new, L_near)
+            # check nearby vertices for total cost and connect shortest valid edge
+            # if self.trees[0].V_count > 20:
+            #     import pdb; pdb.set_trace()
+            self.connect_shortest_valid(0, x_new, L_near)
 
-                    if x_new in self.trees[0].E:
-                        # rewire tree
-                        self.rewire(0, x_new, L_near)
+            if x_new in self.trees[0].E:
+                # rewire tree
+                # import pdb; pdb.set_trace()
+                self.rewire(0, x_new, L_near)
 
-                    solution = self.check_solution()
-                    if solution[0]:
-                        return solution[1]
+            solution = self.check_solution()
+            if solution[0]:
+                return solution[1]

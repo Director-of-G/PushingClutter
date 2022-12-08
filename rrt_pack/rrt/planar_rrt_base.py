@@ -110,7 +110,7 @@ class PlanarRRTBase(object):
         """
         if self.trees[tree].V.count(x_b) == 0 and self.X.collision_free(x_a, x_b, self.r):
             flat_feas, _, _ = self.X.flatness_free(x_a, x_b)  # check feasibility based on differential flatness
-            if not flat_feas:
+            if flat_feas is not True:
                 return False
             self.add_vertex(tree, x_b)
             self.add_edge(tree, x_b, x_a)
@@ -127,7 +127,7 @@ class PlanarRRTBase(object):
         if self.x_goal in self.trees[tree].E and x_nearest in self.trees[tree].E[self.x_goal]:
             # tree is already connected to goal using nearest vertex
             return True
-        if self.X.collision_free(x_nearest, self.x_goal, self.r):  # check if obstacle-free
+        if self.X.collision_free(x_nearest, self.x_goal, self.r) and self.X.flatness_free(x_nearest, self.x_goal):  # check if obstacle-free
             return True
         return False
 

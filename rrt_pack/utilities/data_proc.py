@@ -52,6 +52,7 @@ class KinoPlanData(object):
         dubins = np.zeros((0, 5))
         path_len = np.zeros((0, 1))
         for i in range(len(self.path) - 1):
+            # import pdb; pdb.set_trace()
             pose_now, pose_next = self.path[i], self.path[i + 1]
             _, dir, pt = X.flatness_free(start=pose_now,
                                          end=pose_next)
@@ -87,6 +88,6 @@ class KinoPlanData(object):
     
     
 if __name__ == '__main__':
-    plan_data = KinoPlanData(filename="rrt_planar_pushing_test")
+    plan_data = KinoPlanData(filename="rrt_planar_pushing")
     data = plan_data.data_packer()
     import pdb; pdb.set_trace()

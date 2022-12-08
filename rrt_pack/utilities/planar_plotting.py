@@ -1,14 +1,18 @@
 # This file is subject to the terms and conditions defined in
 # file 'LICENSE', which is part of this source code package.
 
+import plotly as py
+from plotly import graph_objs as go
+
 from matplotlib import pyplot as plt
+from mpl_toolkits.mplot3d.axes3d import Axes3D
 import numpy as np
 import pickle
 
 import sys
 sys.path.append('../../')
 from rrt_pack.search_space.planar_search_space import PlanarSearchSpace
-from rrt_pack.utilities.geometry import rotation_matrix
+from rrt_pack.utilities.geometry import rotation_matrix, angle_limit, planar_dist_between_points
 
 colors = ['darkblue', 'teal']
 
@@ -26,20 +30,34 @@ class PlanarPlot(object):
         :param filename: filename
         """
         self.filename = "../../output/data/" + filename + ".pkl"
+        self.htmlname = "../../output/visualizations/" + filename + ".html"
+        self.obscloud_filename = "../../output/data/X_collision.npy"  # sampled point cloud that represent X_collision
+        self.freecloud_filename = "../../output/data/X_free.npy"  # sampled point cloud that represent X_free
         self.obstacles = None
         self.path = None
         self.tree = None
         self.X = X  # search space (Cfree)
+        self.X_dimensions = self.X.X_dimensions
+        self.r = 0.001  # resolution when plotting tree branches
+        
+        # for plotly
+        self.data = []
         self.layout = {'title': 'Plot',
-                       'showlegend': False
+                       'showlegend': False,
+                       'xaxis': {'autorange': False, 'range': [-2.5, 2.5]},
+                       'yaxis': {'autorange': False, 'range': [-2.5, 2.5]},
+                    #    'zaxis': {'autorange': False, 'range': [-2.5, 2.5]}
                        }
 
-        # self.fig = {'data': self.data,
-        #             'layout': self.layout}
+        self.fig = {'data': self.data,
+                    'layout': self.layout}
         
-    def load_result_file(self):
-        file = open(self.filename, 'rb')
-        result = pickle.load(file)
+    def load_result_file(self, data=None):
+        if data is not None:
+            result = data
+        else:
+            file = open(self.filename, 'rb')
+            result = pickle.load(file)
         self.obstacles = result['obstacles']
         self.path = np.array(result['path'])
 
@@ -69,7 +87,10 @@ class PlanarPlot(object):
             _, force_dir, contact_pt = self.X.flatness_free(self.path[i], self.path[i + 1])
             # check the feasible force direction that push the slider forward
             forward_dir = rotation_matrix(self.path[i, 2]).T @ (self.path[i + 1, :2] - self.path[i, :2])
-            idx = np.argmax(force_dir.T @ forward_dir)
+            try:
+                idx = np.argmax(force_dir.T @ forward_dir)
+            except:
+                import pdb; pdb.set_trace()
             dirs = np.concatenate((dirs, np.expand_dims(force_dir[:, idx], axis=1)), axis=1)
             pts = np.concatenate((pts, np.expand_dims(contact_pt[:, idx], axis=1)), axis=1)
             
@@ -114,6 +135,235 @@ class PlanarPlot(object):
         plt.gca().set_aspect('equal')
         plt.show()
         
+    def plot_tree(self, X, trees):
+        """
+        Plot tree
+        :param X: Search Space
+        :param trees: list of trees
+        """
+        try:
+            assert X.dimensions == 3  # planar pushing is represented in 3D
+        except:
+            print("Planar pushing should have 3 dimensions")
+        self.plot_tree_3d(trees)
+        
+    def trans_cart2toroi(self, cart_coords):
+        """
+        Translate Cartesian coordinates to Toroidal coordinates
+        :param cart_coords: cartesian coordinates (x, y, theta)
+        """
+        x, y, theta = cart_coords
+        x_lb, x_ub = self.X_dimensions[0]
+        y_lb, y_ub = self.X_dimensions[1]
+        
+        radius = 1. * (1. + (x - x_lb) / (x_ub - x_lb))
+        height = -0.5 + (y - y_lb) / (y_ub - y_lb)
+        
+        toroi_coords = (radius * np.cos(theta), radius * np.sin(theta), height)
+        
+        return toroi_coords
+    
+    def interpolate_pose(self, start, end, p):
+        """
+        Get the linear interpolated pose between start and end
+        :param start: start pose
+        :param end: end pose
+        :param p: coefficient (result=start*(1-p)+end*p)
+        """
+        x_interp = start[0] * (1 - p) + end[0] * p
+        y_interp = start[1] * (1 - p) + end[1] * p
+        theta_diff = angle_limit(end[2] - start[2])
+        theta_interp = angle_limit(start[2] + theta_diff * p)
+        return (x_interp, y_interp, theta_interp)
+    
+    def distance_between_poses(self, start, end):
+        """
+        Calculate the distance between start and end
+        :param start: start pose
+        :param end: end pose
+        """
+        weights = [1, 1, np.linalg.norm(self.X.geom, ord=2)/2]
+        return planar_dist_between_points(start, end, weights)
+            
+    def plot_tree_3d(self, trees):
+        """
+        Plot 3D trees
+        :param trees: trees to plot
+        """
+        self.fig = plt.figure()
+        self.ax = Axes3D(self.fig)
+        for i, tree in enumerate(trees):
+            for start, end in tree.E.items():
+                if end is not None:
+                    distance = self.distance_between_poses(start, end)
+                    N = max(10, int(distance / self.r))
+                    p = np.linspace(0, 1, N)
+                    scatter_pts = []
+                    for k in range(len(p)):
+                        pt = self.interpolate_pose(start, end, p[k])
+                        pt = self.trans_cart2toroi(pt)
+                        scatter_pts.append(pt)
+                    scatter_pts = np.array(scatter_pts)
+                    
+                    # trace = go.Scatter3d(
+                    #     x=scatter_pts[:, 0].tolist(),
+                    #     y=scatter_pts[:, 1].tolist(),
+                    #     z=scatter_pts[:, 2].tolist(),
+                    #     line=dict(
+                    #         color=colors[i]
+                    #     ),
+                    #     mode="lines"
+                    # )
+                    # self.data.append(trace)
+                    self.ax.plot(scatter_pts[:, 0].tolist(),
+                                 scatter_pts[:, 1].tolist(),
+                                 scatter_pts[:, 2].tolist(),
+                                 linewidth=1,
+                                 color='darkblue')
+                    
+    def plot_path(self, X, path):
+        """
+        Plot path through Search Space
+        :param X: Search Space
+        :param path: path through space given as a sequence of points
+        """
+        try:
+            assert X.dimensions == 3  # planar pushing is represented in 3D
+        except:
+            print("Planar pushing should have 3 dimensions")
+        path_pts = []
+        for i in range(len(path) - 1):
+            distance = self.distance_between_poses(path[i], path[i + 1])
+            N = max(10, int(distance / self.r))
+            p = np.linspace(0, 1, N)
+            for k in range(len(p)):
+                pt = self.interpolate_pose(path[i], path[i + 1], p[k])
+                pt = self.trans_cart2toroi(pt)
+                path_pts.append(pt)
+        path_pts = np.array(path_pts)
+        
+        # trace = go.Scatter3d(
+        #     x=path_pts[:, 0].tolist(),
+        #     y=path_pts[:, 1].tolist(),
+        #     z=path_pts[:, 2].tolist(),
+        #     line=dict(
+        #         color="red",
+        #         width=4
+        #     ),
+        #     mode="lines"
+        # )
+        # self.data.append(trace)
+        
+        self.ax.plot(path_pts[:, 0].tolist(),
+                     path_pts[:, 1].tolist(),
+                     path_pts[:, 2].tolist(),
+                     linewidth=1,
+                     color='red')
+        
+    def plot_start(self, X, x_init):
+        """
+        Plot starting point
+        :param X: Search Space
+        :param x_init: starting location
+        """
+        try:
+            assert X.dimensions == 3  # planar pushing is represented in 3D
+        except:
+            print("Planar pushing should have 3 dimensions")
+        pt = self.trans_cart2toroi(x_init)
+        
+        # trace = go.Scatter3d(
+        #     x=[pt[0]],
+        #     y=[pt[1]],
+        #     z=[pt[2]],
+        #     line=dict(
+        #         color="orange",
+        #         width=10
+        #     ),
+        #     mode="markers"
+        # )
+        # self.data.append(trace)
+        
+        self.ax.scatter(pt[0], pt[1], pt[2], marker='o', s=10, color='orange')
+        
+    def plot_goal(self, X, x_goal):
+        """
+        Plot goal point
+        :param X: Search Space
+        :param x_goal: goal location
+        """
+        try:
+            assert X.dimensions == 3  # planar pushing is represented in 3D
+        except:
+            print("Planar pushing should have 3 dimensions")
+        pt = self.trans_cart2toroi(x_goal)
+        
+        # trace = go.Scatter3d(
+        #     x=[pt[0]],
+        #     y=[pt[1]],
+        #     z=[pt[2]],
+        #     line=dict(
+        #         color="green",
+        #         width=10
+        #     ),
+        #     mode="markers"
+        # )
+        # self.data.append(trace)
+        
+        self.ax.scatter(pt[0], pt[1], pt[2], marker='o', s=10, color='orange')
+        
+    def plot_cylindrical_surface(self, height, radius):
+        theta = np.linspace(0, 2 * np.pi, 256).reshape(1, 256)
+        z = np.arange(-0.5 * height, 0.5 * height, 0.01 * height).reshape(100, 1)
+        Z = np.repeat(z, 256).reshape(100, 256)
+        x = radius * np.cos(theta)
+        y = radius * np.sin(theta)
+        self.ax.plot_surface(x, y, Z, color='grey', alpha=0.5)
+        
+    def plot_pointcloud(self, plot_col=False, plot_free=False):
+        """
+        Plot sampled points in X_free(green) and X_collision(red) respectively
+        """
+        if plot_col:
+            obs_cloud = np.load(self.obscloud_filename)
+            xcol_pts = []  # samples points in X_collision
+            for i in range(len(obs_cloud)):
+                pt = self.trans_cart2toroi(obs_cloud[i, :])
+                xcol_pts.append(pt)
+            xcol_pts = np.array(xcol_pts)
+            self.ax.scatter(xcol_pts[:, 0],
+                            xcol_pts[:, 1],
+                            xcol_pts[:, 2],
+                            s=0.5,
+                            color='red',
+                            alpha=0.5)
+        
+        if plot_free:
+            free_cloud = np.load(self.freecloud_filename)
+            xfree_pts = []  # samples points in X_collision
+            for i in range(len(free_cloud)):
+                pt = self.trans_cart2toroi(free_cloud[i, :])
+                xfree_pts.append(pt)
+            xfree_pts = np.array(xfree_pts)
+            self.ax.scatter(xfree_pts[:, 0],
+                            xfree_pts[:, 1],
+                            xfree_pts[:, 2],
+                            s=0.5,
+                            color='green',
+                            alpha=0.5)
+        
+    def draw(self, auto_open=True):
+        """
+        Render the plot to a file
+        """
+        fig = self.fig
+        ax  =self.ax
+        self.ax.set_xlim([-2.5, 2.5])
+        self.ax.set_ylim([-2.5, 2.5])
+        self.ax.set_zlim([-1.5, 1.5])
+        plt.show()
+        # py.offline.plot(self.fig, filename=self.htmlname, auto_open=auto_open)
+        
         
 if __name__ == '__main__':
     X_dimensions = np.array([(0, 0.5), (0, 0.5), (-np.pi, np.pi)])
@@ -130,5 +380,17 @@ if __name__ == '__main__':
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
     plot = PlanarPlot(filename='rrt_planar_pushing',
                       X=X)
+    
+    # plot 2d visualization
     plot.load_result_file()
     plot.plot_rrt_result()
+    
+    # test plot the sampled X_free
+    """
+    plot.fig = plt.figure()
+    plot.ax = Axes3D(plot.fig)
+    plot.plot_cylindrical_surface(1, 1)
+    plot.plot_cylindrical_surface(1, 2)
+    plot.plot_pointcloud(plot_col=False, plot_free=True)
+    plot.draw(auto_open=True)
+    """

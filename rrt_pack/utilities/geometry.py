@@ -120,7 +120,6 @@ def steer(start, goal, d):
     return tuple(steered_point)
 
 
-# TODO: ANGLE_CLIP IS OF NO USE
 def sweep(start, goal, revol, q):
     """
     Return the farthest point towards goal from start
@@ -135,7 +134,7 @@ def sweep(start, goal, revol, q):
     center = np.array([revol.x, revol.y])
     for i in range(len(q)):
         next_point = center + rotation_matrix(q[i] * revol.theta) @ (start[:2] - center)
-        next_yaw = angle_clip(start[2] + q[i] * revol.theta)
+        next_yaw = angle_limit(start[2] + q[i] * revol.theta)
         next_point = np.concatenate((next_point, [next_yaw]), axis=0)
         pts = np.concatenate((pts, np.expand_dims(next_point, 1)), axis=1)
         
