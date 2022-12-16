@@ -12,7 +12,8 @@ class KinoPlanData(object):
     """
     def __init__(self, filename) -> None:
         # self.filename = "../../output/data/" + filename + ".pkl"
-        self.filename = "D:/learning/PlanarPushing/rrt-algorithms/output/data/" + filename + ".pkl"
+        # self.filename = "D:/learning/PlanarPushing/rrt-algorithms/output/data/" + filename + ".pkl"
+        self.filename = "D:/Tsinghua/jyp/IRM/pushing_clutter/rrt-algorithms/output/data/" + filename + ".pkl"
         self.data = None
         
     def data_parser(self):

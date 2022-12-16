@@ -1,6 +1,6 @@
-## Author: Joao Moura
-## Contact: jpousad@ed.ac.uk
-## Date: 15/12/2020
+## Author: Joao Moura (Modifed by Yongpeng Jiang)
+## Contact: jpousad@ed.ac.uk (jyp19@mails.tsinghua.edu.cn)
+## Date: 15/12/2020 (Modified on 16/12/2022)
 ## -------------------------------------------------------------------
 ## Description:
 ## 
@@ -12,6 +12,8 @@
 ## -------------------------------------------------------------------
 import numpy as np
 import casadi as cs
+from copy import deepcopy
+from rrt_pack.utilities.geometry import rotation_matrix
 
 ## Generate Nominal Trajectory (line)
 def generate_traj_line(x_f, y_f, N, N_MPC):
@@ -52,7 +54,18 @@ def generate_traj_eight(side_lenght, N, N_MPC):
     y_nom = side_lenght*np.sin(s)*np.cos(s)
     # return x_nom, y_nom
     return np.concatenate((x_nom, x_nom[1:N_MPC+1]), axis=0), np.concatenate((y_nom, y_nom[1:N_MPC+1]), axis=0)
-def compute_nomState_from_nomTraj(x_data, y_data, dt):
+def generate_traj_sine(yaw, lamda, length, amplitude, N, N_MPC):
+    s = np.linspace(0.0, 2.0 * np.pi, N)  # 2 periods
+    x_nom = s / np.max(s) * length
+    y_nom = amplitude * np.sin(s / lamda)
+    x_nom -= x_nom[0]
+    y_nom -= y_nom[0]
+    coords = np.concatenate((np.expand_dims(x_nom, axis=0), np.expand_dims(y_nom, axis=0)), axis=0)
+    coords = rotation_matrix(yaw) @ coords
+    x_nom = coords[0].squeeze()
+    y_nom = coords[1].squeeze()
+    return np.concatenate((x_nom, x_nom[-1]+x_nom[1:N_MPC+1]), axis=0), np.concatenate((y_nom, y_nom[-1]+y_nom[1:N_MPC+1]), axis=0)
+def compute_nomState_from_nomTraj(x_data, y_data, dt, beta=None, phi_r=0., multiSliders=False):
     # assign two first state trajectories
     x0_nom = x_data
     x1_nom = y_data
@@ -78,6 +91,15 @@ def compute_nomState_from_nomTraj(x_data, y_data, dt):
     Dx3_nom = np.diff(x3_nom)
     # stack state and derivative of state
     # x_nom = np.vstack((x0_nom, x1_nom, x2_nom, x3_nom))
-    x_nom = cs.horzcat(x0_nom, x1_nom, x2_nom, x3_nom).T
-    dx_nom = cs.horzcat(Dx0_nom, Dx1_nom, Dx2_nom, Dx3_nom).T/dt
+    if not multiSliders:
+        x_nom = cs.horzcat(x0_nom, x1_nom, x2_nom, x3_nom).T
+        dx_nom = cs.horzcat(Dx0_nom, Dx1_nom, Dx2_nom, Dx3_nom).T/dt
+    else:
+        x4_nom = x0_nom + beta[0]
+        x5_nom = x1_nom + beta[0]*np.tan(phi_r)
+        x6_nom = deepcopy(x2_nom)
+        x7_nom = np.ones_like(x3_nom)*phi_r
+        Dx4_nom, Dx5_nom, Dx6_nom, Dx7_nom = np.diff(x4_nom), np.diff(x5_nom), np.diff(x6_nom), np.diff(x7_nom)
+        x_nom = cs.horzcat(x0_nom, x1_nom, x2_nom, x3_nom, x4_nom, x5_nom, x6_nom, x7_nom).T
+        dx_nom = cs.horzcat(Dx0_nom, Dx1_nom, Dx2_nom, Dx3_nom, Dx4_nom, Dx5_nom, Dx6_nom, Dx7_nom).T/dt
     return x_nom, dx_nom

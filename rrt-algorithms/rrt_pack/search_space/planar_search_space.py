@@ -4,6 +4,9 @@
 import numpy as np
 from rtree import index
 
+from shapely.geometry import Point, Polygon
+from shapely.ops import nearest_points
+
 from rrt_pack.utilities.math import angle_limit, angle_diff
 from rrt_pack.utilities.geometry import es_points_along_line, es_points_along_arc, Revolute, rotation_matrix
 from rrt_pack.utilities.obstacle_generation import obstacle_generator
@@ -103,7 +106,7 @@ class PlanarSearchSpace(object):
         :return: True if line segment does not intersect an obstacle, False otherwise
         """
         revol = self.pose2steer(start, end)
-        pt_set1, pt_set2 = self.point_pairs(start, end)
+        pt_set1, pt_set2 = self.point_pairs(start, end, revol)
         
         # check arc collision
         for i in range(pt_set1.shape[1]):
@@ -212,7 +215,7 @@ class PlanarSearchSpace(object):
 
         return revol
     
-    def point_pairs(self, start, end):
+    def point_pairs(self, start, end, revol=None):
         """
         Return the corresponding point pairs on start pose and end pose
         :param start: current pose
@@ -222,6 +225,21 @@ class PlanarSearchSpace(object):
         """
         pt_set1 = np.expand_dims(start[:2], 1) + rotation_matrix(start[2]) @ self.slider_relcoords
         pt_set2 = np.expand_dims(end[:2], 1) + rotation_matrix(end[2]) @ self.slider_relcoords
+        # if we know the revolution (COR, angle) between 'start' and 'end',
+        # we return an extra pair of points, which is the nearest point between
+        # COR and the 'start', 'end' poses
+        if revol is not None:
+            start_pts = np.concatenate((pt_set1, np.expand_dims(pt_set1[:, 0], axis=1)), axis=1).T
+            end_pts = np.concatenate((pt_set2, np.expand_dims(pt_set2[:, 0], axis=1)), axis=1).T
+            cor_pt = Point(revol.x, revol.y)
+            start_poly = Polygon(start_pts)
+            end_poly = Polygon(end_pts)
+
+            nearest_pt1 = nearest_points(start_poly, cor_pt)
+            nearest_pt2 = nearest_points(end_poly, cor_pt)
+
+            pt_set1 = np.concatenate((pt_set1, np.expand_dims([nearest_pt1[0].x, nearest_pt1[1].y], axis=1)), axis=1)
+            pt_set2 = np.concatenate((pt_set2, np.expand_dims([nearest_pt2[0].x, nearest_pt2[1].y], axis=1)), axis=1)
         
         return pt_set1, pt_set2
 
@@ -237,11 +255,27 @@ class PlanarSearchSpace(object):
 if __name__ == '__main__':
     from rrt_pack.rrt.planar_rrt import PlanarRRT
     X_dimensions = np.array([(0, 0.5), (0, 0.5), (-np.pi, np.pi)])
-    Obstacles = np.array([(0.05, 0.0, 0.5, 0.05), 
-                          (0.0, 0.0, 0.05, 0.5),
-                          (0.05, 0.45, 0.5, 0.5),
-                          (0.45, 0.05, 0.5, 0.45),
-                          (0.15, 0.15, 0.45, 0.35)])
+    # Letter 'C' with tunnel width=0.1
+    # Obstacles = np.array([(0.05, 0.0, 0.5, 0.05), 
+    #                       (0.0, 0.0, 0.05, 0.5),
+    #                       (0.05, 0.45, 0.5, 0.5),
+    #                       (0.45, 0.05, 0.5, 0.45),
+    #                       (0.15, 0.15, 0.45, 0.35)])
+
+    # Letter 'C' with tunnel width=0.08
+    # Obstacles = np.array([(0.07, 0.0, 0.5, 0.06), 
+    #                       (0.0, 0.0, 0.07, 0.5),
+    #                       (0.07, 0.44, 0.5, 0.5),
+    #                       (0.45, 0.06, 0.5, 0.44),
+    #                       (0.15, 0.14, 0.45, 0.36)])
+
+    # Letter 'F' with tunnel width=0.1
+    Obstacles = np.array([(0.0, 0.0, 0.5, 0.025), 
+                        (0.0, 0.025, 0.025, 0.5),
+                        (0.125, 0.025, 0.5, 0.175),
+                        (0.025, 0.475, 0.5, 0.5),
+                        (0.475, 0.175, 0.5, 0.475),
+                        (0.125, 0.275, 0.475, 0.375)])
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=[0.07, 0.12])
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
@@ -324,7 +358,7 @@ if __name__ == '__main__':
         ptr_set2 = np.concatenate((ptr_set2, np.expand_dims(ptr_set2[:, 0], 1)), axis=1).T
 
         revol = X.pose2steer(slider1, slider2)
-        pt_set1, pt_set2 = X.point_pairs(slider1, slider2)
+        pt_set1, pt_set2 = X.point_pairs(slider1, slider2, revol)
         
         # check differential flatness constraints
         flat_feas, force_dirs, contact_pts = X.flatness_free(slider1, slider2)
@@ -383,11 +417,11 @@ if __name__ == '__main__':
     for i in range(sample_num):
         sample = X.sample_collision()
         collision_pts.append(sample)
-    np.save('../../output/data/X_collision.npy', collision_pts)
+    np.save('../../output/data/X_collision_F_letter.npy', collision_pts)
     # sample poses in X_free
     sample_num = 2000
     free_pts = []
     for i in range(sample_num):
         sample = X.sample_free()
         free_pts.append(sample)
-    np.save('../../output/data/X_free.npy', free_pts)
+    np.save('../../output/data/X_free_F_letter.npy', free_pts)

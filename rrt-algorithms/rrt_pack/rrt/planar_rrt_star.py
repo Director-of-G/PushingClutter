@@ -55,7 +55,9 @@ class PlanarRRTStar(PlanarRRT):
         for c_near, x_near in L_near:
             curr_cost = planar_path_cost(self.trees[tree].E, self.x_init, x_near, self.trees[tree].weights)
             tent_cost = planar_path_cost(self.trees[tree].E, self.x_init, x_new, self.trees[tree].weights) + planar_segment_cost(x_new, x_near, self.trees[tree].weights)
-            if tent_cost < curr_cost and self.X.collision_free(x_near, x_new, self.r) and self.X.flatness_free(x_near, x_new)[0] is True:
+            # when rewiring, please note the order of node is inverted
+            # from parent(x_new) to child(x_near)
+            if tent_cost < curr_cost and self.X.collision_free(x_near, x_new, self.r) and self.X.flatness_free(x_new, x_near)[0]:
                 # print('Rewire occurance')
                 self.trees[tree].E[x_near] = x_new
 

@@ -44,7 +44,7 @@ N = int(T*freq)  # total number of iterations
 dyn = sliding_pack.dyn.Sys_sq_slider_quasi_static_ellip_lim_surf(
         planning_config['dynamics'],
         planning_config['TO']['contactMode'],
-        planning_config['TO']['contactFace'],
+        '-x',
         pusherAngleLim=0.
 )
 
@@ -53,22 +53,26 @@ dyn = sliding_pack.dyn.Sys_sq_slider_quasi_static_ellip_lim_surf(
 # Generate Nominal Trajectory
 #  -------------------------------------------------------------------
 X_goal = planning_config['TO']['X_goal']
-X_goal = [0.4, 0.1, 0.3, 0.]
+# X_goal = [0.4, 0.1, 0.3, 0.]
+X_goal = [0.4, 0.2, (20./180.) * np.pi, 0.]
 # print(X_goal)
 x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(X_goal[0], X_goal[1], N, 0)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(0.3, 0.4, N, 0)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_circle(-np.pi/2, 3*np.pi/2, 0.1, N, 0)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_eight(0.2, N, 0)
+# x0_nom, x1_nom = sliding_pack.traj.generate_traj_sine(0.0, 1.0, 0.5, 0.05, N, 0)
 #  -------------------------------------------------------------------
 # stack state and derivative of state
 # the slider rotate to tangent direction of the nominal trajectory in one step
 X_nom_val, _ = sliding_pack.traj.compute_nomState_from_nomTraj(x0_nom, x1_nom, dt)
 #  ------------------------------------------------------------------
 
+import pdb; pdb.set_trace()
+
 # Compute nominal actions for sticking contact
 #  ------------------------------------------------------------------
 optObj = sliding_pack.to.buildOptObj(
-        dyn, N, planning_config['TO'], dt=dt, useGoalFlag=True)
+        dyn, N, planning_config['TO'], X_nom_val=X_nom_val, dt=dt, useGoalFlag=False, phic0Fixed=True)
 # Set obstacles
 #  ------------------------------------------------------------------
 if optObj.numObs==0:
@@ -81,7 +85,7 @@ elif optObj.numObs==3:
     obsCentre = [[0.1, 0.1], [0.0, 0.3], [0.3, -0.125]]
     obsRadius = [0.05, 0.05, 0.05]
 #  ------------------------------------------------------------------
-x_init = [0., 0., -20.*(np.pi/180.), 0.]
+x_init = [0., 0., 0., 0.8]
 # x_init = [0., 0., -20.*(np.pi/180.), -50.*(np.pi/180.)]
 # x_init = [0.38, 0.22, -70.*(np.pi/180.), 0.]
 beta = [
@@ -90,6 +94,7 @@ beta = [
     planning_config['dynamics']['pusherRadious']
 ]
 # x_init = [0., 0., 340.*(np.pi/180.), 0.]
+X_goal = X_nom_val[:, -1].toarray().squeeze().tolist()
 resultFlag, X_nom_val_opt, U_nom_val_opt, other_opt, _, t_opt = optObj.solveProblem(
         0, x_init, beta,
         X_warmStart=X_nom_val,
@@ -130,6 +135,7 @@ if save_to_file:
 # Animation
 #  -------------------------------------------------------------------
 # X_nom_val_opt = np.load('./X_opt.npy')
+# X_nom_val_opt = np.load('./X_0.npy')
 plt.rcParams['figure.dpi'] = 150
 if show_anim:
     #  ---------------------------------------------------------------
@@ -159,57 +165,65 @@ if show_anim:
             repeat=False,
     )
     # to save animation, uncomment the line below:
-    # ani.save('planning_with_obstacles.mp4', fps=25, extra_args=['-vcodec', 'libx264'])
+    ani.save('./video/planning_single_slider.mp4', fps=25, extra_args=['-vcodec', 'libx264'])
 #  -------------------------------------------------------------------
 
 # # Plot Optimization Results
 # #  -------------------------------------------------------------------
-# fig, axs = plt.subplots(3, 4, sharex=True)
-# fig.set_size_inches(10, 10, forward=True)
-# t_Nx = np.linspace(0, T, N)
-# t_Nu = np.linspace(0, T, N-1)
-# ctrl_g = dyn.g_u.map(N-1)
-# ctrl_g_val = ctrl_g(U_nom_val_opt, other_opt)
+fig, axs = plt.subplots(3, 4, sharex=True)
+fig.set_size_inches(10, 10, forward=True)
+t_Nx = np.linspace(0, T, N)
+t_Nu = np.linspace(0, T, N-1)
+ctrl_g = dyn.g_u.map(N-1)
+ctrl_g_val = ctrl_g(U_nom_val_opt, other_opt)
 # #  -------------------------------------------------------------------
 # # plot position
-# for i in range(dyn.Nx):
-#     axs[0, i].plot(t_Nx, X_nom_val[i, 0:N].T, color='red',
-#                    linestyle='--', label='nom')
-#     axs[0, i].plot(t_Nx, X_nom_val_opt[i, 0:N].T, color='blue',
-#                    linestyle='--', label='plan')
-#     handles, labels = axs[0, i].get_legend_handles_labels()
-#     axs[0, i].legend(handles, labels)
-#     axs[0, i].set_xlabel('time [s]')
-#     axs[0, i].set_ylabel('x%d' % i)
-#     axs[0, i].grid()
+for i in range(dyn.Nx):
+    axs[0, i].plot(t_Nx, X_nom_val[i, 0:N].T, color='red',
+                   linestyle='--', label='nom')
+    axs[0, i].plot(t_Nx, X_nom_val_opt[i, 0:N].T, color='blue',
+                   linestyle='--', label='plan')
+    handles, labels = axs[0, i].get_legend_handles_labels()
+    axs[0, i].legend(handles, labels)
+    axs[0, i].set_xlabel('time [s]')
+    axs[0, i].set_ylabel('x%d' % i)
+    axs[0, i].grid()
 # #  -------------------------------------------------------------------
 # # plot extra variables
-# for i in range(dyn.Nz):
-#     axs[1, 2].plot(t_Nu, other_opt[i, :].T, label='s%d' % i)
-# handles, labels = axs[1, 2].get_legend_handles_labels()
-# axs[1, 2].legend(handles, labels)
-# axs[1, 2].set_xlabel('time [s]')
-# axs[1, 2].set_ylabel('extra vars')
-# axs[1, 2].grid()
+for i in range(dyn.Nz):
+    axs[1, 2].plot(t_Nu, other_opt[i, :].T, label='s%d' % i)
+handles, labels = axs[1, 2].get_legend_handles_labels()
+axs[1, 2].legend(handles, labels)
+axs[1, 2].set_xlabel('time [s]')
+axs[1, 2].set_ylabel('extra vars')
+axs[1, 2].grid()
 # #  -------------------------------------------------------------------
 # # plot constraints
-# for i in range(dyn.Ng_u):
-#     axs[1, 3].plot(t_Nu, ctrl_g_val[i, :].T, label='g%d' % i)
-# handles, labels = axs[1, 3].get_legend_handles_labels()
-# axs[1, 3].legend(handles, labels)
-# axs[1, 3].set_xlabel('time [s]')
-# axs[1, 3].set_ylabel('constraints')
-# axs[1, 3].grid()
+# friction cone constraints
+for i in [0, 1]:
+    axs[1, 1].plot(t_Nu, ctrl_g_val[i, :].T, label='g%d' % i)
+handles, labels = axs[1, 1].get_legend_handles_labels()
+axs[1, 1].legend(handles, labels)
+axs[1, 1].set_xlabel('time [s]')
+axs[1, 1].set_ylabel('constraints')
+axs[1, 1].grid()
+for i in [2, 3]:
+    axs[1, 3].plot(t_Nu, ctrl_g_val[i, :].T, label='g%d' % i)
+handles, labels = axs[1, 3].get_legend_handles_labels()
+axs[1, 3].legend(handles, labels)
+axs[1, 3].set_xlabel('time [s]')
+axs[1, 3].set_ylabel('constraints')
+axs[1, 3].grid()
 # #  -------------------------------------------------------------------
 # # plot actions
-# for i in range(dyn.Nu):
-#     axs[2, i].plot(t_Nu, U_nom_val_opt[i, 0:N-1].T, color='blue',
-#                    linestyle='--', label='plan')
-#     handles, labels = axs[2, i].get_legend_handles_labels()
-#     axs[2, i].legend(handles, labels)
-#     axs[2, i].set_xlabel('time [s]')
-#     axs[2, i].set_ylabel('u%d' % i)
-#     axs[2, i].grid()
+for i in range(dyn.Nu):
+    axs[2, i].plot(t_Nu, U_nom_val_opt[i, 0:N-1].T, color='blue',
+                   linestyle='--', label='plan')
+    handles, labels = axs[2, i].get_legend_handles_labels()
+    axs[2, i].legend(handles, labels)
+    axs[2, i].set_xlabel('time [s]')
+    axs[2, i].set_ylabel('u%d' % i)
+    axs[2, i].grid()
 # #  -------------------------------------------------------------------
 
 #  -------------------------------------------------------------------

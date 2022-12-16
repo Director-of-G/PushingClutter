@@ -80,4 +80,5 @@ class RRTConnect(RRTBase):
                     second_part.reverse()
                     return first_part + second_part
             self.swap_trees()
+            print()
             self.samples_taken += 1

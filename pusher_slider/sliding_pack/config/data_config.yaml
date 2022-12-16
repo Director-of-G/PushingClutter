@@ -1,0 +1,11 @@
+#
+# Configuration file for data collection and exploitation
+# 
+
+collection:
+    regionRadius: 0.05  # the sampled configurations are located on the circle with r=regionRadius
+    yawResolution: 0.03  # (rad) the adjacent samples on a circle
+    thetaResolution: 0.3  # (rad) the adjacent samples with the same (x, y)
+    pushPointResolution: 0.01  # (m) the adjacent contact locations on the slider's side
+    maxIters: 200  # max iterations of the solver
+    contactFace: ['-x']

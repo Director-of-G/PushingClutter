@@ -100,22 +100,39 @@ class PlanarRRTBase(object):
         self.samples_taken += 1
         return tuple(x_new[:, feas_index]), x_nearest
 
-    def connect_to_point(self, tree, x_a, x_b):
+    def connect_to_point(self, tree, x_a, x_b, x_b_on_tree=False):
         """
         Connect vertex x_a in tree to vertex x_b
         :param tree: int, tree to which to add edge
         :param x_a: tuple, vertex
         :param x_b: tuple, vertex
+        :param x_b_on_tree: bool, for rrt_connect, set x_b_on_tree=True, because x_a is x_rand and x_b is x_nearest
         :return: bool, True if able to add edge, False if prohibited by an obstacle
         """
-        if self.trees[tree].V.count(x_b) == 0 and self.X.collision_free(x_a, x_b, self.r):
-            flat_feas, _, _ = self.X.flatness_free(x_a, x_b)  # check feasibility based on differential flatness
-            if flat_feas is not True:
-                return False
-            self.add_vertex(tree, x_b)
-            self.add_edge(tree, x_b, x_a)
-            return True
-        return False
+        if x_b_on_tree is False:
+            if self.trees[tree].V.count(x_b) == 0 and self.X.collision_free(x_a, x_b, self.r):
+                # if tree == 0:
+                flat_feas, _, _ = self.X.flatness_free(x_a, x_b)  # check feasibility based on differential flatness
+                # else:  # tree == 1
+                #     flat_feas, _, _ = self.X.flatness_free(x_b, x_a)  # for the tree rooted at goal, the branch grows from x_new to x_near
+                if flat_feas is not True:
+                    return False
+                self.add_vertex(tree, x_b)
+                self.add_edge(tree, x_b, x_a)
+                return True
+            return False
+        else:
+            if self.trees[tree].V.count(x_a) == 0 and self.X.collision_free(x_a, x_b, self.r):
+                # if tree == 0:
+                flat_feas, _, _ = self.X.flatness_free(x_a, x_b)  # check feasibility based on differential flatness
+                # else:  # tree == 1
+                #     flat_feas, _, _ = self.X.flatness_free(x_b, x_a)  # for the tree rooted at goal, the branch grows from x_new to x_near
+                if flat_feas is not True:
+                    return False
+                self.add_vertex(tree, x_a)
+                self.add_edge(tree, x_a, x_b)
+                return True
+            return False
 
     def can_connect_to_goal(self, tree):
         """

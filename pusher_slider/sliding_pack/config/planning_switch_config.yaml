@@ -33,3 +33,6 @@ TO:
     codeGenFlag: False
     noPrintingFlag: False
     phases: null
+    gamma_u: [1., 1., 0.069462]
+    converge_eps: 1e-4
+    max_iters: 1000

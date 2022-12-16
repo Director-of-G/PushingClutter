@@ -79,6 +79,7 @@ class SliderConvertor(object):
         self.dubins = data['dubins']
         self.path_len = data['path_len']
         self.push_pt = data['contact']
+        self.force = data['force']
 
     def planning_config_setter(self, planning_config):
         """
@@ -184,7 +185,8 @@ class SliderConvertor(object):
                 X_goal = X_goal.tolist()
             
             # X_nom_val[:, 2] += yaw_shift
-            optObj = sliding_pack.to.buildOptObj(dyn, N, self.planning_config['TO'], dt=dt, useGoalFlag=True)
+            optObj = sliding_pack.to.buildOptObj(dyn, N, self.planning_config['TO'], X_nom_val=X_nom_val,
+                                                 dt=dt, useGoalFlag=True, phic0Fixed=True)
 
             resultFlag, X_nom_val_opt, U_nom_val_opt, other_opt, _, t_opt = optObj.solveProblem(
                     0, x_init, beta,
@@ -450,7 +452,7 @@ if show_anim:
     #  ---------------------------------------------------------------
     # to save animation, uncomment the line below:
     # ani.save('planning_with_obstacles1.mp4', fps=25, extra_args=['-vcodec', 'libx264'])
-        ani.save('./video/planning_with_obstacles_F_rrt_star.mp4', fps=25)
+        ani.save('./video/planning_with_obstacles_F_rrt_star_planning_avoid_obstacle2.mp4', fps=25)
 #  -------------------------------------------------------------------
 
 # # Plot Optimization Results

@@ -1,6 +1,6 @@
-# Author: Joao Moura
-# Contact: jpousad@ed.ac.uk
-# Date: 02/06/2021
+# Author: Joao Moura (Modifed by Yongpeng Jiang)
+# Contact: jpousad@ed.ac.uk (jyp19@mails.tsinghua.edu.cn)
+# Date: 02/06/2021 (Modified on 12/15/2022)
 # -------------------------------------------------------------------
 # Description:
 # 
@@ -19,13 +19,28 @@ import sliding_pack
 class buildOptObj():
 
     def __init__(self, dyn_class, timeHorizon, configDict, X_nom_val=None,
-                 U_nom_val=None, dt=0.1, useGoalFlag=False):
+                 U_nom_val=None, dt=0.1, useGoalFlag=False, phic0Fixed=True,
+                 maxIter=None, multiSliders=False):
 
         # init parameters
         self.dyn = dyn_class
         self.TH = timeHorizon
         self.solver_name = configDict['solverName']
-        self.W_x = cs.diag(cs.SX(configDict['W_x']))
+        # neglect the cost of phic
+        if not multiSliders:
+            if phic0Fixed is not True:
+                self.W_x = cs.diag(cs.SX(configDict['W_x']))[:self.dyn.Nx-1,
+                                                            :self.dyn.Nx-1]
+            else:
+                self.W_x = cs.diag(cs.SX(configDict['W_x']))[:self.dyn.Nx,
+                                                            :self.dyn.Nx]
+        else:
+            if phic0Fixed is not True:
+                self.W_x = cs.diag(cs.SX(configDict['W_x']))[:3,
+                                                            :3]
+            else:
+                self.W_x = cs.diag(cs.SX(configDict['W_x']))[:4,
+                                                            :4]
         self.W_u = cs.diag(cs.SX(configDict['W_u']))[:self.dyn.Nu,
                                                      :self.dyn.Nu]
         self.K_goal = configDict['K_goal']
@@ -41,6 +56,7 @@ class buildOptObj():
         self.code_gen = configDict['codeGenFlag']
         self.no_printing = configDict['noPrintingFlag']
         self.phases = configDict['phases']
+        self.multiSliders=multiSliders
 
         # opt var dimensionality
         self.Nxu = self.dyn.Nx + self.dyn.Nu
@@ -118,23 +134,57 @@ class buildOptObj():
                     [__x_bar_next-__x_bar-dt*(cs.mtimes(__A_func(__x_nom, __u_nom, self.dyn.beta), __x_bar) + cs.mtimes(__B_func(__x_nom,__u_nom, self.dyn.beta),__u_bar))])
         else:
             __x_next = cs.SX.sym('__x_next', self.dyn.Nx)
-            self.f_error = cs.Function(
-                    'f_error',
-                    [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta],
-                    [__x_next-self.dyn.x-dt*self.dyn.f(self.dyn.x,self.dyn.u,self.dyn.beta)])
+            if not self.multiSliders:
+                self.f_error = cs.Function(
+                        'f_error',
+                        [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta],
+                        [__x_next-self.dyn.x-dt*self.dyn.f(self.dyn.x,self.dyn.u,self.dyn.beta)])
+            else:
+                self.f_error = cs.Function(
+                        'f_error',
+                        [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta],
+                        [__x_next[:4]-self.dyn.x[:4]-dt*self.dyn.f1(self.dyn.x,self.dyn.u,self.dyn.beta)])
         # ---- Map dynamics constraint ----
         self.F_error = self.f_error.map(self.TH-1)
+        # ---- Define Intrinsic constraints on state variables ----
+        if self.multiSliders:
+            __x_next = cs.SX.sym('__x_next', self.dyn.Nx)
+            self.x_intrinsic_error = cs.Function(
+                'x_intrinsic_error',
+                [self.dyn.x, self.dyn.beta],
+                [self.dyn.x[4:7]-self.dyn.x[0:3]-self.dyn.beta[0]*cs.vertcat(1., cs.tan(self.dyn.x[7]), 0.)])
+            # self.phi_intrinsic_error = cs.Function(
+            #     'phi_intrinsic_error',
+            #     [self.dyn.x, __x_next],
+            #     [__x_next[7]-self.dyn.x[7]])
+            # ---- Map Intrinsic constraint ----
+            self.X_intrinsic_error = self.x_intrinsic_error.map(self.TH)
+            # self.Phi_intrinsic_error = self.phi_intrinsic_error.map(self.TH-1)
         #  -------------------------------------------------------------------
         # control constraints
         self.G_u = self.dyn.g_u.map(self.TH-1)
         #  -------------------------------------------------------------------)
 
         #  -------------------------------------------------------------------
-        self.cost_f = cs.Function(
-                'cost_f',
-                [__x_bar, self.dyn.u],
-                [cs.dot(__x_bar, cs.mtimes(self.W_x, __x_bar))
-                    + cs.dot(self.dyn.u, cs.mtimes(self.W_u, self.dyn.u))])
+        if phic0Fixed is not True:
+            self.cost_f = cs.Function(
+                    'cost_f',
+                    [__x_bar, self.dyn.u],
+                    [cs.dot(__x_bar[:3], cs.mtimes(self.W_x, __x_bar[:3]))
+                        + cs.dot(self.dyn.u, cs.mtimes(self.W_u, self.dyn.u))])
+        else:
+            if not self.multiSliders:
+                self.cost_f = cs.Function(
+                        'cost_f',
+                        [__x_bar, self.dyn.u],
+                        [cs.dot(__x_bar, cs.mtimes(self.W_x, __x_bar))
+                            + cs.dot(self.dyn.u, cs.mtimes(self.W_u, self.dyn.u))])
+            else:
+                self.cost_f = cs.Function(
+                        'cost_f',
+                        [__x_bar, self.dyn.u],
+                        [cs.dot(__x_bar[:4], cs.mtimes(self.W_x, __x_bar[:4]))
+                            + cs.dot(self.dyn.u, cs.mtimes(self.W_u, self.dyn.u))])
         self.cost_F = self.cost_f.map(self.TH-1)
         # ------------------------------------------
         if self.dyn.Nz > 0:
@@ -192,10 +242,33 @@ class buildOptObj():
             self.opt.discrete += [self.dyn.z_discrete]*self.dyn.Nz
 
         # ---- Set optimzation constraints ----
-        self.opt.g = (self.X[:, 0]-self.x0).elements()  # Initial Conditions
-        self.args.lbg = [0.0]*self.dyn.Nx
-        self.args.ubg = [0.0]*self.dyn.Nx
-        # ---- Dynamic constraints ---- 
+        if not self.multiSliders:
+            if phic0Fixed:
+                # phic0 is given by self.xo
+                self.opt.g = (self.X[:, 0]-self.x0).elements()  # Initial Conditions
+                self.args.lbg = [0.0]*self.dyn.Nx
+                self.args.ubg = [0.0]*self.dyn.Nx
+            else:
+                # phic0 is unconstrained
+                self.opt.g = (self.X[:, 0]-self.x0).elements()  # Initial Conditions
+                self.args.lbg = [0.0]*(self.dyn.Nx-1)+[-cs.inf]
+                self.args.ubg = [0.0]*(self.dyn.Nx-1)+[cs.inf]
+        else:
+            if phic0Fixed:
+                # phic0 is given by self.xo
+                self.opt.g = (self.X[:, 0]-self.x0).elements()  # Initial Conditions
+                self.args.lbg = [0.0]*self.dyn.Nx
+                self.args.ubg = [0.0]*self.dyn.Nx
+            else:
+                # phic0 is unconstrained
+                self.opt.g = (self.X[:, 0]-self.x0).elements()  # Initial Conditions
+                self.args.lbg = [0.0]*(self.dyn.Nx-1)+[-cs.inf]
+                self.args.ubg = [0.0]*(self.dyn.Nx-1)+[-cs.inf]
+            # self.opt.g = (self.X[7, 0]-self.x0[7]).elements()
+            # self.args.lbg += [0.0]
+            # self.args.ubg += [0.0]
+
+        # ---- Dynamic constraints ----
         if self.linDyn:
             self.opt.g += self.F_error(
                     self.X_nom[:, :-1], self.U_nom,
@@ -207,10 +280,27 @@ class buildOptObj():
                     self.X[:, :-1], self.U, 
                     self.X[:, 1:],
                     self.dyn.beta).elements()
-        self.args.lbg += [0.] * self.dyn.Nx * (self.TH-1)
-        self.args.ubg += [0.] * self.dyn.Nx * (self.TH-1)
+        self.args.lbg += [0.] * 4 * (self.TH-1)
+        self.args.ubg += [0.] * 4 * (self.TH-1)
+        # ---- State Intrinsic constraints ----
+        if self.multiSliders:
+            self.opt.g += self.X_intrinsic_error(
+                    self.X, self.dyn.beta).elements()
+            self.args.lbg += [0.] * 3 * self.TH
+            self.args.ubg += [0.] * 3 * self.TH
+            # self.opt.g += self.Phi_intrinsic_error(
+            #     self.X[:, :-1], self.X[:, 1:]).elements()
+            # self.args.lbg += [0.] * (self.TH-1)
+            # self.args.ubg += [0.] * (self.TH-1)
+            
         # ---- Friction constraints ----
-        self.opt.g += self.G_u(self.U, self.Z).elements()
+        if self.multiSliders:
+            self.opt.g += self.G_u(self.X[:, :-1], 
+                                self.U, 
+                                self.Z, 
+                                self.dyn.beta).elements()
+        else:
+            self.opt.g += self.G_u(self.U, self.Z).elements()
         self.args.lbg += self.dyn.g_lb * (self.TH-1)
         self.args.ubg += self.dyn.g_ub * (self.TH-1)
         if self.linDyn:
@@ -231,6 +321,13 @@ class buildOptObj():
                     self.args.ubg += [cs.inf]
 
         # ---- optimization cost ----
+        # if self.useGoalFlag:
+        #     self.S_goal = cs.SX.sym('s', self.TH-1)
+        #     self.X_goal_var = cs.SX.sym('x_goal_var', self.dyn.Nx)
+        #     # add path cost
+        #     self.opt.f = cs.sum2(self.cost_F(self.X_bar[:, :-1] - self.X_nom[:, :-1], self.U))
+        #     # add terminal cost
+        #     self.opt.f += self.cost_f(cs.mtimes(self.X[:, :-1], self.S_goal) - self.X_goal_var, self.U[:, -1])
         if self.useGoalFlag:
             self.S_goal = cs.SX.sym('s', self.TH-1)
             self.X_goal_var = cs.SX.sym('x_goal_var', self.dyn.Nx)
@@ -239,7 +336,8 @@ class buildOptObj():
             self.opt.f = cs.sum2(self.cost_F(self.X_bar[:, :-1], self.U))
             self.opt.f += self.K_goal*self.cost_f(self.X_bar[:, -1], self.U[:, -1])
         for i in range(self.dyn.Nz):
-            # (what trick is this?)
+            # penalize the slack variables
+            # in this way the problem with complementary constraints could be tackled easily
             self.opt.f += cs.sum1(self.Kz*(self.Z[i].T**2))
 
         # ---- Set optimization parameters ----
@@ -267,6 +365,8 @@ class buildOptObj():
             opts_dict['ipopt.jac_d_constant'] = 'yes'
             opts_dict['ipopt.warm_start_init_point'] = 'yes'
             opts_dict['ipopt.hessian_constant'] = 'yes'
+            if maxIter is not None:
+                opts_dict['ipopt.max_iter'] = maxIter
         if self.solver_name == 'knitro':
             opts_dict['knitro'] = {}
             # opts_dict['knitro.maxit'] = 80
@@ -295,6 +395,7 @@ class buildOptObj():
         # ---- add discrete flag ----
         opts_dict['discrete'] = self.opt.discrete  # add integer variables
         if (self.solver_name == 'ipopt') or (self.solver_name == 'snopt') or (self.solver_name == 'knitro'):
+            import pdb; pdb.set_trace()
             self.solver = cs.nlpsol('solver', self.solver_name, prob, opts_dict)
             if self.code_gen:
                 if not os.path.isfile('./' + prog_name + '.so'):
@@ -303,6 +404,7 @@ class buildOptObj():
                 self.solver = cs.nlpsol('solver', self.solver_name, prog_name + '.so', opts_dict)
         elif (self.solver_name == 'gurobi') or (self.solver_name == 'qpoases'):
             self.solver = cs.qpsol('solver', self.solver_name, prob, opts_dict)
+        import pdb; pdb.set_trace()
         #  -------------------------------------------------------------------
 
     def solveProblem(self, idx, x0, beta,
@@ -320,7 +422,7 @@ class buildOptObj():
         p_ += self.X_nom_val[:, idx:(idx+self.TH)].elements()
         if self.useGoalFlag:
             if X_goal_val is None:
-                p_ += x0
+                p_ += x0  # periodic trajectory, the start is the end
             else:
                 p_ += X_goal_val
             # ----------------------
@@ -390,6 +492,7 @@ class buildOptObj():
         # ---- warm start ----
         # for i in range(0, self.dyn.Nx):
         #     opt_sol[i::self.Nopt] = [0.0]*(self.TH)
+        # clear the inputs, the inputs=0 in warm start solution
         for i in range(self.dyn.Nx, self.Nxu):
             opt_sol[:(self.TH*self.Nxu-self.dyn.Nu)][i::self.Nxu] = [0.]*(self.TH-1)
         opt_sol[(self.TH*self.Nxu-self.dyn.Nu):] = [0.]

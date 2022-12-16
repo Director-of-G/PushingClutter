@@ -12,7 +12,7 @@ import pickle
 import sys
 sys.path.append('../../')
 from rrt_pack.search_space.planar_search_space import PlanarSearchSpace
-from rrt_pack.utilities.geometry import rotation_matrix, angle_limit, planar_dist_between_points
+from rrt_pack.utilities.geometry import rotation_matrix, angle_limit, planar_dist_between_points, es_points_along_arc
 
 colors = ['darkblue', 'teal']
 
@@ -31,8 +31,8 @@ class PlanarPlot(object):
         """
         self.filename = "../../output/data/" + filename + ".pkl"
         self.htmlname = "../../output/visualizations/" + filename + ".html"
-        self.obscloud_filename = "../../output/data/X_collision.npy"  # sampled point cloud that represent X_collision
-        self.freecloud_filename = "../../output/data/X_free.npy"  # sampled point cloud that represent X_free
+        self.obscloud_filename = "../../output/data/X_collision_F_letter.npy"  # sampled point cloud that represent X_collision
+        self.freecloud_filename = "../../output/data/X_free_F_letter.npy"  # sampled point cloud that represent X_free
         self.obstacles = None
         self.path = None
         self.tree = None
@@ -114,7 +114,7 @@ class PlanarPlot(object):
         ptr_set, arrow = self.plot_slider(self.path[-1, :])
         all_ptrs = np.concatenate((all_ptrs, np.expand_dims(ptr_set, 0)), axis=0)
         all_arrows = np.concatenate((all_arrows, np.expand_dims(arrow, 0)), axis=0)
-        
+
         for i in range(self.path.shape[0]):
             plt.arrow(self.path[i, 0], self.path[i, 1], all_arrows[i, 0], all_arrows[i, 1])
             plt.plot(all_ptrs[i, :, 0], all_ptrs[i, :, 1], color='red')
@@ -130,6 +130,22 @@ class PlanarPlot(object):
             arrow = 0.035 * rotation_matrix(self.path[i, 2]) @ dirs[:, i]
             plt.arrow(contact_pt[0], contact_pt[1], arrow[0], arrow[1], color='deepskyblue')
         
+            # plot arcs of rotation
+            for i in range(len(self.path)-1):
+                slider1, slider2 = self.path[i, :], self.path[i+1, :]
+                revol = self.X.pose2steer(slider1, slider2)
+                pt_set1, pt_set2 = self.X.point_pairs(slider1, slider2, revol)
+                for j in range(pt_set1.shape[1]):
+                    points = es_points_along_arc(pt_set1[:, j], pt_set2[:, j], 0.01, revol)
+                    arc_points = []
+                    while True:
+                        try:
+                            arc_points.append(list(next(points)))
+                        except:
+                            break
+                    arc_points = np.array(arc_points)
+                    plt.plot(arc_points[:, 0], arc_points[:, 1], color='deepskyblue')
+
         plt.xlim([0.0, 0.5])
         plt.ylim([0.0, 0.5])
         plt.gca().set_aspect('equal')
@@ -219,7 +235,7 @@ class PlanarPlot(object):
                                  scatter_pts[:, 1].tolist(),
                                  scatter_pts[:, 2].tolist(),
                                  linewidth=1,
-                                 color='darkblue')
+                                 color=colors[i])
                     
     def plot_path(self, X, path):
         """
@@ -386,11 +402,9 @@ if __name__ == '__main__':
     plot.plot_rrt_result()
     
     # test plot the sampled X_free
-    """
     plot.fig = plt.figure()
     plot.ax = Axes3D(plot.fig)
     plot.plot_cylindrical_surface(1, 1)
     plot.plot_cylindrical_surface(1, 2)
     plot.plot_pointcloud(plot_col=False, plot_free=True)
     plot.draw(auto_open=True)
-    """

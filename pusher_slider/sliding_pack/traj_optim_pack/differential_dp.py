@@ -39,6 +39,7 @@ class buildDDPOptObj():
         self.W_u_arr = np.diag(configDict['W_u'][:3])
         self.gamma_u = cs.DM(cs.diag(configDict['gamma_u']))
         self.converge_eps = configDict['converge_eps']
+        self.max_iters = configDict['max_iters']
         
         # input constraints
         self.A_u = np.array([[ 1, 0, 0],
@@ -464,8 +465,10 @@ class buildDDPOptObj():
         # integrate forward after coldboot
         X = self.coldboot_integration(x0, U0)
         U = U0
+        np.save('../../examples/X_0.npy', X)
         import pdb; pdb.set_trace()
         
+        n_iter = 0
         while True:
             self.backward_propagation(X, U)
             X_hat, U_hat = self.forward_integration(X, U)
@@ -488,9 +491,14 @@ class buildDDPOptObj():
                np.linalg.norm([(U_hat[:, i] - U[:, i]).T @ self.W_u_arr @ (U_hat[:, i] - U[:, i]) for i in range(self.TH)]) < 0.0001:
                 X, U = X_hat, U_hat
                 break
+
+            if n_iter > self.max_iters:
+                X, U = X_hat, U_hat
+                break
             
             X, U = X_hat, U_hat
             check_converge = True
+            n_iter += 1
         
         import pdb; pdb.set_trace()
         return X, U
@@ -516,7 +524,7 @@ if __name__ == '__main__':
     U_nom = np.load('./U_nom.npy')
     X_real = np.load('./X_real.npy')
     x0 = X_real[:, 0].reshape(4, 1)
-    x0[-1] -= 0.07
+    x0[-1] -= 0.11
     U0 = U_nom
     ddpOptObj.beta_value = [0.07, 0.12, 0.01]
     ddpOptObj.set_nominal_traj(X_real)

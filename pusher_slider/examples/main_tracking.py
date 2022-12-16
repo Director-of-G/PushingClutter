@@ -33,7 +33,7 @@ freq = 25  # number of increments per second
 # N_MPC = 12 # time horizon for the MPC controller
 N_MPC = 25  # time horizon for the MPC controller
 # x_init_val = [-0.03, 0.03, 30*(np.pi/180.), 0]
-x_init_val = [0., 0., 45*(np.pi/180.), 0]
+x_init_val = [0., 0., 0.*(np.pi/180.), 0]
 show_anim = True
 save_to_file = False
 #  -------------------------------------------------------------------
@@ -62,7 +62,8 @@ X_goal = tracking_config['TO']['X_goal']
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(0.5, 0.3, N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_circle(-np.pi/2, 3*np.pi/2, 0.2, N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_ellipse(-np.pi/2, 3*np.pi/2, 0.2, 0.1, N, N_MPC)
-x0_nom, x1_nom = sliding_pack.traj.generate_traj_eight(0.3, N, N_MPC)
+# x0_nom, x1_nom = sliding_pack.traj.generate_traj_eight(0.3, N, N_MPC)
+x0_nom, x1_nom = sliding_pack.traj.generate_traj_sine(0.0, 1.0, 0.5, 0.05, N, N_MPC)
 #  -------------------------------------------------------------------
 # stack state and derivative of state
 X_nom_val, _ = sliding_pack.traj.compute_nomState_from_nomTraj(x0_nom, x1_nom, dt)
@@ -82,6 +83,7 @@ beta = [
     planning_config['dynamics']['yLenght'],
     planning_config['dynamics']['pusherRadious']
 ]
+import pdb; pdb.set_trace()
 resultFlag, X_nom_val_opt, U_nom_val_opt, _, _, _ = optObjNom.solveProblem(
         0, [0., 0., 0.*(np.pi/180.), 0.], beta,
         X_warmStart=X_nom_val)
@@ -247,14 +249,14 @@ if show_anim:
     ani = animation.FuncAnimation(
             fig,
             dyn.animate,
-            fargs=(ax, X_plot, beta, X_future),
+            fargs=(ax, X_plot, beta, False, None, X_future),
             frames=Nidx-1,
             interval=dt*1000,  # microseconds
             blit=True,
             repeat=False,
     )
     # to save animation, uncomment the line below:
-    # ani.save('MPC_MPCC_eight.mp4', fps=25, extra_args=['-vcodec', 'libx264'])
+    ani.save('./video/MPC_MPCC_line.mp4', fps=25, extra_args=['-vcodec', 'libx264'])
 #  -------------------------------------------------------------------
 
 # Plot Optimization Results
@@ -328,5 +330,6 @@ for i in range(dyn.Nu):
 #  -------------------------------------------------------------------
 
 #  -------------------------------------------------------------------
+import pdb; pdb.set_trace()
 plt.show()
 #  -------------------------------------------------------------------

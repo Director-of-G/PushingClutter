@@ -2,17 +2,36 @@
 # file 'LICENSE', which is part of this source code package.
 import numpy as np
 
+import argparse
+from enum import Enum
 import pickle
 import sys
 sys.path.append('../../')
 from rrt_pack.rrt.planar_rrt import PlanarRRT
 from rrt_pack.rrt.planar_rrt_star import PlanarRRTStar
+from rrt_pack.rrt.planar_rrt_connect import PlanarRRTConnect
 from rrt_pack.search_space.planar_search_space import PlanarSearchSpace
 from rrt_pack.utilities.planar_plotting import PlanarPlot
 
 
-save_file = True
-plot_figure = True
+class Method(Enum):
+       rrt = 'rrt'
+       rrt_star = 'rrt_star'
+       rrt_connect = 'rrt_connect'
+
+       def __str__(self):
+              return self.value
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('-sf', '--save_file', action='store_true', default=True, help='save the planning result to pickle file')
+parser.add_argument('-pf', '--plot_figure', action='store_true', default=True, help='plot fdata in figures')
+parser.add_argument('-m', '--method', type=Method, choices=list(Method), help='planning method', required=True)
+args = parser.parse_args()
+
+
+save_file = args.save_file
+plot_figure = args.plot_figure
 
 
 X_dimensions = np.array([(0, 0.5), (0, 0.5), (-np.pi, np.pi)])
@@ -69,11 +88,17 @@ X.create_slider_geometry(geom=slider_geom)
 X.create_slider_dynamics(ratio=ab_ratio, miu=miu)
 
 # create rrt_search
-# rrt = PlanarRRT(X, Q, x_init, x_goal, max_samples, r, prc)
-# path = rrt.rrt_search()
+if args.method == Method.rrt:
+       rrt = PlanarRRT(X, Q, x_init, x_goal, max_samples, r, prc)
+       path = rrt.rrt_search()
 
-rrt = PlanarRRTStar(X, Q, x_init, x_goal, max_samples, r, prc, rewire_count)
-path = rrt.rrt_star()
+elif args.method == Method.rrt_star:
+       rrt = PlanarRRTStar(X, Q, x_init, x_goal, max_samples, r, prc, rewire_count)
+       path = rrt.rrt_star()
+
+elif args.method == Method.rrt_connect:
+       rrt = PlanarRRTConnect(X, Q, x_init, x_goal, max_samples, r, prc)
+       path = rrt.rrt_connect()
 
 
 base_info = {'geom': slider_geom,
