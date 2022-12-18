@@ -91,6 +91,8 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         __RA[0,0] = __cthetaA; __RA[0,1] = -__sthetaA; __RA[1,0] = __sthetaA; __RA[1,1] = __cthetaA; __RA[2,2] = 1.0
         __cthetaB = cs.cos(__thetaB); __sthetaB = cs.sin(__thetaB)
         __RB[0,0] = __cthetaB; __RB[0,1] = -__sthetaB; __RB[1,0] = __sthetaB; __RB[1,1] = __cthetaB; __RB[2,2] = 1.0
+        self.RA = cs.Function('RA', [__thetaA], [__RA], ['t'], ['ra'])
+        self.RB = cs.Function('RB', [__thetaB], [__RB], ['t'], ['rb'])
         # T - planar transformation matrices
         __TB2A = cs.mtimes(cs.inv(__RA[:2,:2]), __RB[:2,:2]); __TA2B = cs.mtimes(cs.inv(__RB[:2,:2]), __RA[:2,:2])
         # -------------------------------------------------------------------
@@ -148,6 +150,7 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         #  -------------------------------------------------------------------
         __E = np.kron(np.eye(2), np.ones((2, 1)))
         __mu = self.miu * np.eye(2)
+        # __mu = np.diag([0.2, 0.5])
         #  -------------------------------------------------------------------
 
         # lcp problems (wiki: https://en.wikipedia.org/wiki/Linear_complementarity_problem#cite_note-FOOTNOTEFukudaNamiki1994-6)
@@ -180,22 +183,38 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
 
         # dynamic functions
         #  -------------------------------------------------------------------
+        # sliderA, sliderB wrench
+        __wrenchA = cs.mtimes(__N.T, __f_norm) + cs.mtimes(__L.T, __f_tan)
+        __wrenchB = cs.mtimes(__JB0.T,cs.mtimes(__TA2B,cs.mtimes(__nsel,__f_norm)+cs.mtimes(__tsel,__f_tan)))
+        self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__ctact,__f_ctact], [__wrenchA], ['b', 't', 'c', 'f'], ['wA_'])
+        self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__ctact,__f_ctact], [__wrenchB], ['b', 't', 'c', 'f'], ['wB_'])
+        self.wrenchA = cs.Function('wrenchA', [self.beta,self.theta,self.ctact,self.z],
+                                   [self.wrenchA_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
+        self.wrenchB = cs.Function('wrenchB', [self.beta,self.theta,self.ctact,self.z],
+                                   [self.wrenchB_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
         # sliderA twist
-        __V = cs.mtimes(__A, cs.mtimes(__N.T, __f_norm) + cs.mtimes(__L.T, __f_tan))
+        __VA = cs.mtimes(__A, __wrenchA)
+        __VB = cs.mtimes(__A, __wrenchB)
+        self.VA_ = cs.Function('VA_', [__Beta,__theta,__ctact,__f_ctact], [__VA], ['b', 't', 'c', 'f'], ['VA_'])
+        self.VB_ = cs.Function('VB_', [__Beta,__theta,__ctact,__f_ctact], [__VB], ['b', 't', 'c', 'f'], ['VB_'])
+        self.VA = cs.Function('VA', [self.beta,self.theta,self.ctact,self.z],
+                              [self.VA_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'f'], ['VA'])
+        self.VB = cs.Function('VB', [self.beta,self.theta,self.ctact,self.z],
+                              [self.VB_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'f'], ['VB'])
         # slider pose
-        __fA = cs.mtimes(__RA,__V)
-        __fB = cs.mtimes(cs.mtimes(__RB,__A),cs.mtimes(__JB0.T,cs.mtimes(__TA2B,cs.mtimes(__nsel,__f_norm)+cs.mtimes(__tsel,__f_tan))))
+        __fA = cs.mtimes(__RA,__VA)
+        __fB = cs.mtimes(__RB,__VB)
         self.fA_ = cs.Function('fA_', [__Beta, __theta, __ctact, __f_ctact], [__fA], ['b', 't', 'f', 'c'], ['fa_'])
         self.fB_ = cs.Function('fB_', [__Beta, __theta, __ctact, __f_ctact], [__fB], ['b', 't', 'f', 'c'], ['fb_'])
         self.fA = cs.Function('fA', [self.beta, self.theta, self.ctact, self.z],
                             [self.fA_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'f', 'c'], ['fa'])
         self.fB = cs.Function('fB', [self.beta, self.theta, self.ctact, self.z],
-                            [self.fA_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'f', 'c'], ['fb'])
+                            [self.fB_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'f', 'c'], ['fb'])
         # pusher
-        __fvp = cs.mtimes(__JA0,__V)-__vp
-        self.fvp_ = cs.Function('fvp_', [__Beta, __theta, __ctact, __f_ctact], [cs.vertcat(0,__fvp[1])], ['b', 't', 'c', 'f'], ['fp'])
-        self.fvp_ = cs.Function('fvp_', [self.beta, self.theta, self.ctact, self.z],
-                                [self.fvp_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'f'], ['fp'])
+        __fvp = __vp-cs.mtimes(__JA0,__VA)
+        self.fvp_ = cs.Function('fvp_', [__Beta, __theta, __ctact, __f_ctact, __vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'c', 'f', 'v'], ['fp_'])
+        self.fvp = cs.Function('fvp', [self.beta, self.theta, self.ctact, self.z, self.vp],
+                                [self.fvp_(self.beta,self.theta,self.ctact,self.z[:6],self.vp)], ['b', 't', 'c', 'f', 'v'], ['fp'])
         #  -------------------------------------------------------------------
 
         # other matrices for debug
@@ -205,11 +224,11 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         self.F_ = cs.Function('F_', [__ctact, __f_ctact], [__F], ['c', 'f'], ['F_'])
         self.F = cs.Function('F', [self.ctact, self.z], [self.F_(self.ctact, self.z[:6])], ['c', 'f'], ['F'])
         #  -------------------------------------------------------------------
-        self.V_ = cs.Function('V_', [__Beta, __ctact, __f_ctact], [__V], ['b', 'c', 'f'], ['V_'])
+        self.V_ = cs.Function('V_', [__Beta, __ctact, __f_ctact], [__VA], ['b', 'c', 'f'], ['V_'])
         self.V = cs.Function('V', [self.beta, self.ctact, self.z], [self.V_(self.beta, self.ctact, self.z[:6])], ['b', 'c', 'f'], ['V'])
         #  -------------------------------------------------------------------
-        __vpB = cs.mtimes(__K, cs.mtimes(__nsel, __f_norm) + cs.mtimes(__tsel, __f_tan))
-        self.vpB_ = cs.Function('vpB_', [__Beta, __theta, __ctact, __f_ctact], [__vpB], ['b', 't', 'c', 'f'], ['v'])
+        __vpB = cs.mtimes(__K, cs.mtimes(__nsel, __f_norm) + cs.mtimes(__tsel, __f_tan))-cs.mtimes(__JA1,__VA)
+        self.vpB_ = cs.Function('vpB_', [__Beta, __theta, __ctact, __f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'c', 'f'], ['v'])
         self.vpB = cs.Function('vpB', [self.beta, self.theta, self.ctact, self.z], 
                                [self.vpB_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
         #  -------------------------------------------------------------------
@@ -218,6 +237,86 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         self.L_ = cs.Function('L_', [__ctact], [__L], ['c'], ['L_'])
         self.L = cs.Function('L', [self.ctact], [self.L_(self.ctact)], ['c'], ['L'])
         #  -------------------------------------------------------------------
+        
+    def set_patches(self, ax, x_a_data, x_b_data, x_c_data, beta):
+        """
+        :param vis_flatness: visualize auxiliary lines for differential flatness or not
+        """
+        Xl = beta[0]
+        Yl = beta[1]
+        R_pusher = beta[2]
+        x_a0 = x_a_data[:, 0]
+        x_b0 = x_b_data[:, 0]
+        
+        R_a0 = np.eye(3)
+        d_a0 = R_a0.dot(np.array([-Xl/2., -Yl/2., 0]))        
+        R_b0 = np.eye(3)
+        d_b0 = R_b0.dot(np.array([-Xl/2., -Yl/2., 0]))
+        
+        x_c0 = x_a0[:2] + R_a0[:2, :2] @ x_c_data[:, 0]
+        d_c0 = R_a0.dot(np.array([-R_pusher, 0., 0.]))
+        
+        self.slider_a = patches.Rectangle(
+                x_a0[0:2]+d_a0[0:2], Xl, Yl, angle=0.0)
+        self.slider_b = patches.Rectangle(
+                x_b0[0:2]+d_b0[0:2], Xl, Yl, angle=0.0)
+        
+        self.pusher = patches.Circle(
+                x_c0[0:2]+d_c0[0:2], radius=R_pusher, color='black')
+        
+        # self.path_past, = ax.plot(x0[0], x0[1], color='orange')
+        # self.path_future, = ax.plot(x0[0], x0[1],
+        #         color='orange', linestyle='dashed')
+        # self.cor = patches.Circle(
+        #         np.array([0, 0]), radius=0.002, color='deepskyblue')
+        
+        ax.add_patch(self.slider_a)
+        ax.add_patch(self.slider_b)
+        ax.add_patch(self.pusher)
+        
+        # ax.add_patch(self.cor)
+        # self.path_past.set_linewidth(2)
+        
+    def animate(self, i, ax, x_a_data, x_b_data, x_c_data, beta, X_future=None):
+        Xl = beta[0]
+        Yl = beta[1]
+        R_pusher = beta[2]
+        x_ai = x_a_data[:, i]
+        x_bi = x_b_data[:, i]
+        # distance between centre of square reference corner
+        R_ai = np.array(self.RA(x_ai[2]))
+        R_bi = np.array(self.RB(x_bi[2]))
+        d_ai = R_ai.dot(np.array([-Xl/2, -Yl/2, 0]))
+        d_bi = R_bi.dot(np.array([-Xl/2, -Yl/2, 0]))
+        x_ci = x_ai[:2] + R_ai[:2, :2] @ x_c_data[:, i]
+        d_ci = R_ai.dot(np.array([-R_pusher, 0., 0.]))
+        # square reference corner
+        c_ai = x_ai[0:3] + d_ai
+        c_bi = x_bi[0:3] + d_bi
+        c_ci = x_ci[:2] + d_ci[:2]
+        # compute transformation with respect to rotation angle xi[2]
+        trans_a_ax = ax.transData
+        coords_a = trans_a_ax.transform(c_ai[0:2])
+        trans_ai = transforms.Affine2D().rotate_around(
+                coords_a[0], coords_a[1], x_ai[2])
+        trans_b_ax = ax.transData
+        coords_b = trans_b_ax.transform(c_bi[0:2])
+        trans_bi = transforms.Affine2D().rotate_around(
+                coords_b[0], coords_b[1], x_bi[2])
+        # Set changes
+        self.slider_a.set_transform(trans_a_ax+trans_ai)
+        self.slider_a.set_xy([c_ai[0], c_ai[1]])
+        self.slider_b.set_transform(trans_b_ax+trans_bi)
+        self.slider_b.set_xy([c_bi[0], c_bi[1]])
+        self.pusher.set_center(c_ci)
+        
+        # Set path changes
+        # if self.path_past is not None:
+        #     self.path_past.set_data(x_data[0, 0:i], x_data[1, 0:i])
+        # if (self.path_future is not None) and (X_future is not None):
+        #     self.path_future.set_data(X_future[0, :, i], X_future[1, :, i])
+            
+        return []
 
 # -------------------------------------------------------------------
 
