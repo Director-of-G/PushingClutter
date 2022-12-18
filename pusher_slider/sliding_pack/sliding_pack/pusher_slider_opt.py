@@ -395,7 +395,6 @@ class buildOptObj():
         # ---- add discrete flag ----
         opts_dict['discrete'] = self.opt.discrete  # add integer variables
         if (self.solver_name == 'ipopt') or (self.solver_name == 'snopt') or (self.solver_name == 'knitro'):
-            import pdb; pdb.set_trace()
             self.solver = cs.nlpsol('solver', self.solver_name, prob, opts_dict)
             if self.code_gen:
                 if not os.path.isfile('./' + prog_name + '.so'):
@@ -404,7 +403,6 @@ class buildOptObj():
                 self.solver = cs.nlpsol('solver', self.solver_name, prog_name + '.so', opts_dict)
         elif (self.solver_name == 'gurobi') or (self.solver_name == 'qpoases'):
             self.solver = cs.qpsol('solver', self.solver_name, prob, opts_dict)
-        import pdb; pdb.set_trace()
         #  -------------------------------------------------------------------
 
     def solveProblem(self, idx, x0, beta,

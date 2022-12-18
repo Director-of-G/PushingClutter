@@ -21,6 +21,8 @@ from sliding_pack.utils import gen_nom_traj as traj
 
 from sliding_pack.sliding_pack import dynamic_model as dyn
 
+from sliding_pack.sliding_pack import dynamic_model_mc as dyn_mc
+
 from sliding_pack.sliding_pack import classes4opt as opt
 
 from sliding_pack.sliding_pack import pusher_slider_opt as to
