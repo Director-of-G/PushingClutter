@@ -15,7 +15,8 @@ import casadi as cs
 from copy import deepcopy
 from rrt_pack.utilities.geometry import rotation_matrix
 
-## Generate Nominal Trajectory (line)
+## Generate Nominal Trajectory (single slider)
+## -------------------------------------------------------------------
 def generate_traj_line(x_f, y_f, N, N_MPC):
     x_nom = np.linspace(0.0, x_f, N)
     y_nom = np.linspace(0.0, y_f, N)
@@ -103,3 +104,25 @@ def compute_nomState_from_nomTraj(x_data, y_data, dt, beta=None, phi_r=0., multi
         x_nom = cs.horzcat(x0_nom, x1_nom, x2_nom, x3_nom, x4_nom, x5_nom, x6_nom, x7_nom).T
         dx_nom = cs.horzcat(Dx0_nom, Dx1_nom, Dx2_nom, Dx3_nom, Dx4_nom, Dx5_nom, Dx6_nom, Dx7_nom).T/dt
     return x_nom, dx_nom
+## -------------------------------------------------------------------
+
+## Generate Nominal Trajectory (double slider, contact behavior)
+## -------------------------------------------------------------------
+def generate_traj_align_sliders(yA1_0, yA1_N, dtheta0, N, N_MPC):
+    """
+    SliderA has an edge contact, sliderB has a vertex contact.
+    The initial contact y-coordinate on sliderA is yA1_0.
+    The goal contact y-coordinate on sliderA is yA1_N.
+    The initial azimuth angle different (thetaB-thetaA)=dtheta0.
+    """
+    # nominal trajectory in N timesteps
+    ya1_nom = np.linspace(yA1_0, yA1_N, N)
+    dtheta_nom = np.linspace(dtheta0, 0., N)
+    # temporary trajectory in another N_MPC timesteps
+    ya1_nom = np.concatenate((ya1_nom, ya1_nom[1:N_MPC+1]-yA1_0+yA1_N), axis=0)
+    dtheta_nom = np.concatenate((dtheta_nom, dtheta_nom[1:N_MPC+1]-dtheta0+0.), axis=0)
+    ya0_nom = np.zeros_like(ya1_nom)
+    return np.c_[ya0_nom, ya1_nom, dtheta_nom].T
+def compute_nearest_point_index(ya1_nom, ya1):
+    dist = np.abs(ya1_nom - ya1)
+    return np.argmin(dist)

@@ -57,13 +57,14 @@ dyn = sliding_pack.dyn.Sys_sq_slider_quasi_static_ellip_lim_surf(
 # Generate Nominal Trajectory
 #  -------------------------------------------------------------------
 X_goal = tracking_config['TO']['X_goal']
+X_goal = [0.4, 0.1, (20./180.)*np.pi]
 # print(X_goal)
-# x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(X_goal[0], X_goal[1], N, N_MPC)
+x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(X_goal[0], X_goal[1], N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(0.5, 0.3, N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_circle(-np.pi/2, 3*np.pi/2, 0.2, N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_ellipse(-np.pi/2, 3*np.pi/2, 0.2, 0.1, N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_eight(0.3, N, N_MPC)
-x0_nom, x1_nom = sliding_pack.traj.generate_traj_sine(0.0, 1.0, 0.5, 0.05, N, N_MPC)
+# x0_nom, x1_nom = sliding_pack.traj.generate_traj_sine(0.0, 1.0, 0.5, 0.05, N, N_MPC)
 #  -------------------------------------------------------------------
 # stack state and derivative of state
 X_nom_val, _ = sliding_pack.traj.compute_nomState_from_nomTraj(x0_nom, x1_nom, dt)

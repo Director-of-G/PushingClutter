@@ -24,6 +24,7 @@ import sliding_pack
 
 class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
     # The dynamic model for single-pusher-double-slider.
+    # The pusher directly manipulate slider A. And slider A pushes slider B.
     # The slider A has a face contact. and the slider B has a vertex contact.
     # The dynamic model is under quasi-static assumption.
     # The dynamic model is approximated by an ellipsoid.
@@ -33,6 +34,12 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         #  -------------------------------------------------------------------
         self.miu = configDict['pusherFricCoef']  # fric between pusher and slider
         self.f_lim = configDict['pusherForceLim']
+        self.v_lim = configDict['pusherVelLim']
+        self.x_length = configDict['xLenght']
+        self.y_length = configDict['yLenght']
+        self.Kx_max = configDict['Kx_max']
+        self.Ks_max = configDict['Ks_max']
+        self.Ks_min = configDict['Ks_min']
         self.n_ctact = contactNum  # number of contacts (including the pusher)
         #  -------------------------------------------------------------------
         self.Nbeta = 3
@@ -85,6 +92,7 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         __thetaA = cs.SX.sym('__thetaA')
         __thetaB = cs.SX.sym('__thetaB')
         __theta = cs.vertcat(__thetaA, __thetaB)
+        __dtheta = __thetaB - __thetaA
         # R - rotation matrices
         __RA, __RB = cs.SX(3, 3), cs.SX(3, 3)
         __cthetaA = cs.cos(__thetaA); __sthetaA = cs.sin(__thetaA)
@@ -94,15 +102,22 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         self.RA = cs.Function('RA', [__thetaA], [__RA], ['t'], ['ra'])
         self.RB = cs.Function('RB', [__thetaB], [__RB], ['t'], ['rb'])
         # T - planar transformation matrices
-        __TB2A = cs.mtimes(cs.inv(__RA[:2,:2]), __RB[:2,:2]); __TA2B = cs.mtimes(cs.inv(__RB[:2,:2]), __RA[:2,:2])
+        # __TB2A = cs.mtimes(cs.inv(__RA[:2,:2]), __RB[:2,:2]); __TA2B = cs.mtimes(cs.inv(__RB[:2,:2]), __RA[:2,:2])
+        __TB2A, __TA2B = cs.SX(2, 2), cs.SX(2, 2)
+        __cdtheta = cs.cos(__dtheta); __sdtheta = cs.sin(__dtheta)
+        __TB2A[0,0] = __cdtheta; __TB2A[0,1] = -__sdtheta; __TB2A[1,0] = __sdtheta; __TB2A[1,1] = __cdtheta
+        __TA2B[0,0] = __cdtheta; __TA2B[0,1] = __sdtheta; __TA2B[1,0] = -__sdtheta; __TA2B[1,1] = __cdtheta
         # -------------------------------------------------------------------
 
         # contact jacobian
         #  -------------------------------------------------------------------
         # contact locations
-        __xA0 = cs.SX.sym('__xA0'); __yA0 = cs.SX.sym('__yA0')
-        __xA1 = cs.SX.sym('__xA1'); __yA1 = cs.SX.sym('__yA1')
-        __xB0 = cs.SX.sym('__xB0'); __yB0 = cs.SX.sym('__yB0')
+        # __xA0 = cs.SX.sym('__xA0'); __yA0 = cs.SX.sym('__yA0')
+        # __xA1 = cs.SX.sym('__xA1'); __yA1 = cs.SX.sym('__yA1')
+        # __xB0 = cs.SX.sym('__xB0'); __yB0 = cs.SX.sym('__yB0')
+        __xA0 = -__Beta[0]/2; __yA0 = cs.SX.sym('__yA0')
+        __xA1 = __Beta[0]/2; __yA1 = cs.SX.sym('__yA1')
+        __xB0 = -__Beta[0]/2; __yB0 = -__Beta[1]/2
         __ctact = cs.SX(3, 2)
         __ctact[0, 0] = __xA0; __ctact[0, 1] = __yA0
         __ctact[1, 0] = __xA1; __ctact[1, 1] = __yA1
@@ -118,7 +133,7 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         #  -------------------------------------------------------------------
         # auxiliary matrix
         __K = cs.mtimes(cs.mtimes(cs.mtimes(__TB2A, __JB0), __A), cs.mtimes(__JB0.T, __TA2B))
-        self.K = cs.Function('K', [__Beta, __ctact, __theta], [__K], ['b', 'c', 't'], ['K'])
+        # self.K = cs.Function('K', [__Beta, __ctact, __theta], [__K], ['b', 'c', 't'], ['K'])
         #  -------------------------------------------------------------------
         # normal vectors
         __nA0 = np.array([[1., 0.]])
@@ -173,11 +188,13 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         __sb = cs.vertcat(-cs.mtimes(__DA0.T, __vp), 0, 0)
         __q = cs.vertcat(__sa, __sb, 0, 0)
         #  -------------------------------------------------------------------
-        self.M_ = cs.Function('M_', [__Beta, __theta, __ctact],
-                              [__M], ['b', 't', 'c'], ['M_'])
+        self.M_ = cs.Function('M_', [__Beta, __theta, __yA0, __yA1],
+                              [__M], ['b', 't', 'ya0', 'ya1'], ['M_'])
+        self.M_opt_ = self.M_
         self.M = cs.Function('M', [self.beta, self.theta, self.ctact],
-                             [self.M_(self.beta, self.theta, self.ctact)], ['b', 't', 'c'], ['M'])
+                             [self.M_(self.beta, self.theta, self.ctact[0,1], self.ctact[1,1])], ['b', 't', 'c'], ['M'])
         self.q_ = cs.Function('q_', [__vp], [__q], ['v'], ['q'])
+        self.q_opt_ = self.q_
         self.q = cs.Function('q', [self.vp], [self.q_(self.vp)], ['v'], ['q'])
         #  -------------------------------------------------------------------
 
@@ -186,56 +203,118 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         # sliderA, sliderB wrench
         __wrenchA = cs.mtimes(__N.T, __f_norm) + cs.mtimes(__L.T, __f_tan)
         __wrenchB = cs.mtimes(__JB0.T,cs.mtimes(__TA2B,cs.mtimes(__nsel,__f_norm)+cs.mtimes(__tsel,__f_tan)))
-        self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__ctact,__f_ctact], [__wrenchA], ['b', 't', 'c', 'f'], ['wA_'])
-        self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__ctact,__f_ctact], [__wrenchB], ['b', 't', 'c', 'f'], ['wB_'])
+        self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__wrenchA], ['b', 't', 'ya0', 'ya1', 'f'], ['wA_'])
+        self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__wrenchB], ['b', 't', 'ya0', 'ya1', 'f'], ['wB_'])
         self.wrenchA = cs.Function('wrenchA', [self.beta,self.theta,self.ctact,self.z],
-                                   [self.wrenchA_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
+                                   [self.wrenchA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
         self.wrenchB = cs.Function('wrenchB', [self.beta,self.theta,self.ctact,self.z],
-                                   [self.wrenchB_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
+                                   [self.wrenchB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
         # sliderA twist
         __VA = cs.mtimes(__A, __wrenchA)
         __VB = cs.mtimes(__A, __wrenchB)
-        self.VA_ = cs.Function('VA_', [__Beta,__theta,__ctact,__f_ctact], [__VA], ['b', 't', 'c', 'f'], ['VA_'])
-        self.VB_ = cs.Function('VB_', [__Beta,__theta,__ctact,__f_ctact], [__VB], ['b', 't', 'c', 'f'], ['VB_'])
+        self.VA_ = cs.Function('VA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__VA], ['b', 't', 'ya0', 'ya1', 'f'], ['VA_'])
+        self.VB_ = cs.Function('VB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__VB], ['b', 't', 'ya0', 'ya1', 'f'], ['VB_'])
         self.VA = cs.Function('VA', [self.beta,self.theta,self.ctact,self.z],
-                              [self.VA_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'f'], ['VA'])
+                              [self.VA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VA'])
         self.VB = cs.Function('VB', [self.beta,self.theta,self.ctact,self.z],
-                              [self.VB_(self.beta,self.theta,self.ctact,self.z[:6])], ['b', 't', 'c', 'f'], ['VB'])
+                              [self.VB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VB'])
         # slider pose
         __fA = cs.mtimes(__RA,__VA)
         __fB = cs.mtimes(__RB,__VB)
-        self.fA_ = cs.Function('fA_', [__Beta, __theta, __ctact, __f_ctact], [__fA], ['b', 't', 'f', 'c'], ['fa_'])
-        self.fB_ = cs.Function('fB_', [__Beta, __theta, __ctact, __f_ctact], [__fB], ['b', 't', 'f', 'c'], ['fb_'])
+        self.fA_ = cs.Function('fA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__fA], ['b', 't', 'ya0', 'ya1', 'c'], ['fa_'])
+        self.fB_ = cs.Function('fB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__fB], ['b', 't', 'ya0', 'ya1', 'c'], ['fb_'])
         self.fA = cs.Function('fA', [self.beta, self.theta, self.ctact, self.z],
-                            [self.fA_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'f', 'c'], ['fa'])
+                            [self.fA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fa'])
         self.fB = cs.Function('fB', [self.beta, self.theta, self.ctact, self.z],
-                            [self.fB_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'f', 'c'], ['fb'])
+                            [self.fB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fb'])
         # pusher
         __fvp = __vp-cs.mtimes(__JA0,__VA)
-        self.fvp_ = cs.Function('fvp_', [__Beta, __theta, __ctact, __f_ctact, __vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'c', 'f', 'v'], ['fp_'])
-        self.fvp = cs.Function('fvp', [self.beta, self.theta, self.ctact, self.z, self.vp],
-                                [self.fvp_(self.beta,self.theta,self.ctact,self.z[:6],self.vp)], ['b', 't', 'c', 'f', 'v'], ['fp'])
+        self.fvp_ = cs.Function('fvp_', [__Beta,__theta,__yA0,__yA1,__f_ctact,__vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'ya0', 'ya1', 'f', 'v'], ['fp_'])
+        self.fvp = cs.Function('fvp', [self.beta,self.theta,self.ctact,self.z,self.vp],
+                                [self.fvp_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6],self.vp)], ['b', 't', 'c', 'z', 'v'], ['fp'])
         #  -------------------------------------------------------------------
 
         # other matrices for debug
         #  -------------------------------------------------------------------
         __F = cs.mtimes(__JA0.T, __f_norm[0]*__nA0.T + cs.mtimes(__DA0, __f_tan[0:2])) + \
               cs.mtimes(__JA1.T, __f_norm[1]*__nA1.T + cs.mtimes(__DA1, __f_tan[2:4]))
-        self.F_ = cs.Function('F_', [__ctact, __f_ctact], [__F], ['c', 'f'], ['F_'])
-        self.F = cs.Function('F', [self.ctact, self.z], [self.F_(self.ctact, self.z[:6])], ['c', 'f'], ['F'])
+        self.F_ = cs.Function('F_', [__yA0,__yA1,__f_ctact], [__F], ['ya0', 'ya1','f'], ['F_'])
+        self.F = cs.Function('F', [self.ctact,self.z], [self.F_(self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['c', 'f'], ['F'])
         #  -------------------------------------------------------------------
-        self.V_ = cs.Function('V_', [__Beta, __ctact, __f_ctact], [__VA], ['b', 'c', 'f'], ['V_'])
-        self.V = cs.Function('V', [self.beta, self.ctact, self.z], [self.V_(self.beta, self.ctact, self.z[:6])], ['b', 'c', 'f'], ['V'])
+        self.V_ = cs.Function('V_', [__Beta,__yA0,__yA1,__f_ctact], [__VA], ['b', 'ya0', 'ya1', 'f'], ['V_'])
+        self.V = cs.Function('V', [self.beta,self.ctact,self.z], [self.V_(self.beta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 'c', 'f'], ['V'])
         #  -------------------------------------------------------------------
         __vpB = cs.mtimes(__K, cs.mtimes(__nsel, __f_norm) + cs.mtimes(__tsel, __f_tan))-cs.mtimes(__JA1,__VA)
-        self.vpB_ = cs.Function('vpB_', [__Beta, __theta, __ctact, __f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'c', 'f'], ['v'])
-        self.vpB = cs.Function('vpB', [self.beta, self.theta, self.ctact, self.z], 
-                               [self.vpB_(self.beta, self.theta, self.ctact, self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
+        self.vpB_ = cs.Function('vpB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'ya0', 'ya1', 'f'], ['v'])
+        self.vpB = cs.Function('vpB', [self.beta,self.theta,self.ctact,self.z], 
+                               [self.vpB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
         #  -------------------------------------------------------------------
-        self.N_ = cs.Function('N_', [__ctact], [__N], ['c'], ['N_'])
-        self.N = cs.Function('N', [self.ctact], [self.N_(self.ctact)], ['c'], ['N'])
-        self.L_ = cs.Function('L_', [__ctact], [__L], ['c'], ['L_'])
-        self.L = cs.Function('L', [self.ctact], [self.L_(self.ctact)], ['c'], ['L'])
+        self.N_ = cs.Function('N_', [__yA0,__yA1], [__N], ['ya0', 'ya1'], ['N_'])
+        self.N = cs.Function('N', [self.ctact], [self.N_(self.ctact[0,1],self.ctact[1,1])], ['c'], ['N'])
+        self.L_ = cs.Function('L_', [__yA0,__yA1], [__L], ['ya0', 'ya1'], ['L_'])
+        self.L = cs.Function('L', [self.ctact], [self.L_(self.ctact[0,1],self.ctact[1,1])], ['c'], ['L'])
+        #  -------------------------------------------------------------------
+        
+        # define symbols for building optimization problems
+        #  -------------------------------------------------------------------
+        self.Nx = 3
+        self.x_opt = cs.SX.sym('x', self.Nx)
+        self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -cs.inf]
+        self.ubx = [0.5*self.y_length, 0.5*self.y_length, cs.inf]
+        
+        __dx = cs.SX(3,1)
+        __dx[0] = cs.mtimes(np.expand_dims(__DA0[:,0], axis=0), __vp - cs.mtimes(__JA0, __VA))
+        __dx[1] = cs.mtimes(np.expand_dims(__DA1[:,1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
+        __dx[2] = (__VB - __VA)[2]
+        
+        self.Nu = 2
+        self.u_opt = cs.SX.sym('u', self.Nu)
+        self.lbu = [0., -self.v_lim]
+        self.ubu = [self.v_lim, self.v_lim]
+        
+        # complementary variables
+        self.Nz = 8
+        self.z_opt = cs.SX.sym('z', self.Nz)
+        self.lbz = [0.]*self.Nz
+        self.ubz = [self.f_lim]*(self.Nz-2)+[cs.inf]*2
+        self.Nw = 8
+        self.w_opt = cs.SX.sym('w', self.Nw)
+        self.lbw = [0.]*self.Nw
+        self.ubw = [cs.inf]*self.Nw
+        
+        # slack variables
+        self.Ns = 8
+        self.s_opt = cs.SX.sym('s', self.Ns)
+        self.s0 = [1.]*self.Ns
+        self.lbs = [-1e-7]*self.Ns
+        self.ubs = [1e-7]*self.Ns
+
+        self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1])], ['b', 'x'], ['M_opt'])
+        self.q_opt = cs.Function('q_opt', [self.u_opt], [self.q_opt_(self.u_opt)], ['u'], ['q_opt'])
+        
+        self.f_opt_ = cs.Function('f_opt_', [__Beta, __theta, __yA0, __yA1, __vp, __f_ctact], [__dx], ['b', 't', 'ya0', 'ya1', 'vp', 'f'], ['f_opt_'])
+        self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
+                                 [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], self.u_opt, self.z_opt[:6])],
+                                 ['b', 'x', 'u', 'z'], ['f_opt'])
+        
+        # (complementary) constraints
+        self.Ng_u = 8
+        g_zw_ = self.z_opt[0]*self.w_opt[0] + self.s_opt[0]
+        for i in range(1, self.Ng_u):
+            g_zw_ = cs.vertcat(g_zw_, self.z_opt[i]*self.w_opt[i] + self.s_opt[i])
+        self.g_zw = cs.Function('g_u', [self.z_opt, self.w_opt, self.s_opt], [g_zw_], ['z', 'w', 's'], ['g'])
+        self.g_lb = [0.]*self.Ng_u
+        self.g_ub = [0.]*self.Ng_u
+        
+        # cost gain for state variable
+        __i_th = cs.SX.sym('__i_th')
+        __Kx_max = self.Kx_max
+        self.kx_f = cs.Function('kx', [__i_th], [__Kx_max * (1. / __i_th)])
+        
+        # cost gain for slack variable
+        __Ks_max = self.Ks_max
+        __Ks_min = self.Ks_min
+        self.ks_f = cs.Function('ks', [__i_th], [__Ks_max * cs.exp(__i_th * cs.log(__Ks_min / __Ks_max))])
         #  -------------------------------------------------------------------
         
     def set_patches(self, ax, x_a_data, x_b_data, x_c_data, beta):

@@ -335,6 +335,7 @@ class buildOptObj():
         else:
             self.opt.f = cs.sum2(self.cost_F(self.X_bar[:, :-1], self.U))
             self.opt.f += self.K_goal*self.cost_f(self.X_bar[:, -1], self.U[:, -1])
+        
         for i in range(self.dyn.Nz):
             # penalize the slack variables
             # in this way the problem with complementary constraints could be tackled easily
@@ -493,11 +494,8 @@ class buildOptObj():
         # clear the inputs, the inputs=0 in warm start solution
         for i in range(self.dyn.Nx, self.Nxu):
             opt_sol[:(self.TH*self.Nxu-self.dyn.Nu)][i::self.Nxu] = [0.]*(self.TH-1)
+        # clear the slack variables
         opt_sol[(self.TH*self.Nxu-self.dyn.Nu):] = [0.]
         self.args.x0 = opt_sol.elements()
-        # ---- add nominal trajectory ----
-        if self.linDyn:
-            x_opt += self.X_nom_val[:, idx:(idx+self.TH)]
-            u_opt += self.U_nom_val[:, idx:(idx+self.TH-1)]
 
         return resultFlag, x_opt, u_opt, other_opt, f_opt, t_opt

@@ -2,9 +2,9 @@
 # Date: 21/08/2020
 #  -------------------------------------------------------------------
 # Description:
-#  This script implements a non-linear program (NLP) model predictive controller (MPC)
-#  for tracking a trajectory of a square slider object with a single
-#  and sliding contact pusher.
+#  This script implements a non-linear program (NLP) model predictive
+#  controller (MPC) for tracking a trajectory of a square slider object
+#  with a single and sliding contact pusher.
 #  -------------------------------------------------------------------
 
 #  import libraries

@@ -27,7 +27,15 @@ from sliding_pack.sliding_pack import classes4opt as opt
 
 from sliding_pack.sliding_pack import pusher_slider_opt as to
 
+from sliding_pack.sliding_pack import double_slider_opt as db_to
+
 from sliding_pack.sliding_pack import augmentation as aug
+
+# ----------------------------------------------------------------
+# import from simulation folder
+# ----------------------------------------------------------------
+
+from sliding_pack.simulation import double_sliders as db_sim
 
 
 
