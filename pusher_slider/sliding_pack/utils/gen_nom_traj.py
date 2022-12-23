@@ -123,6 +123,12 @@ def generate_traj_align_sliders(yA1_0, yA1_N, dtheta0, N, N_MPC):
     dtheta_nom = np.concatenate((dtheta_nom, dtheta_nom[1:N_MPC+1]-dtheta0+0.), axis=0)
     ya0_nom = np.zeros_like(ya1_nom)
     return np.c_[ya0_nom, ya1_nom, dtheta_nom].T
-def compute_nearest_point_index(ya1_nom, ya1):
-    dist = np.abs(ya1_nom - ya1)
+def compute_nearest_point_index(ya1_nom, ya1, ord=1):
+    if ord == 1:
+        dist = np.abs(ya1_nom - ya1)
+    elif ord == 2:
+        if type(ya1) is not np.ndarray:
+            ya1 = ya1.toarray()
+        ya1 = ya1.squeeze().reshape(-1, 1)
+        dist = np.linalg.norm(ya1_nom - ya1, axis=0)
     return np.argmin(dist)

@@ -1,13 +1,11 @@
 # Author: Joao Moura (Modifed by Yongpeng Jiang)
 # Contact: jpousad@ed.ac.uk (jyp19@mails.tsinghua.edu.cn)
-# Date: 19/10/2020 (Modified on 17/12/2022)
+# Date: 19/10/2020 (Modified on 15/12/2022)
 # -------------------------------------------------------------------
 # Description:
 # 
 # Functions modelling the dynamics of an object sliding on a table.
-# Based on: Jiaji Zhou, J. Andrew Bagnell and Matthew T. Mason
-#           2017 paper (arxiv: https://arxiv.org/pdf/1705.10664.pdf)
-# Modified: from dynamic_mode.py in sliding_pack
+# Based on: Hogan F.R, Rodriguez A. (2020) IJRR paper
 # -------------------------------------------------------------------
 
 # -------------------------------------------------------------------
@@ -18,390 +16,774 @@ import numpy as np
 import matplotlib.patches as patches
 import matplotlib.transforms as transforms
 import casadi as cs
-# -------------------------------------------------------------------
 import sliding_pack
 # -------------------------------------------------------------------
 
-class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
-    # The dynamic model for single-pusher-double-slider.
-    # The pusher directly manipulate slider A. And slider A pushes slider B.
-    # The slider A has a face contact. and the slider B has a vertex contact.
+class Sys_sq_slider_quasi_static_ellip_lim_surf():
+    # The dynamic model for single-pusher-single-slider.
     # The dynamic model is under quasi-static assumption.
     # The dynamic model is approximated by an ellipsoid.
-    def __init__(self, configDict, contactNum=2.):
+    def __init__(self, configDict, contactMode='sticking', contactFace='-x', pusherAngleLim=0.):
 
         # init parameters
-        #  -------------------------------------------------------------------
+        self.mode = contactMode
+        self.face = contactFace
+        # self.sl = configDict['sideLenght']  # side dimension of the square slider [m]
         self.miu = configDict['pusherFricCoef']  # fric between pusher and slider
         self.f_lim = configDict['pusherForceLim']
-        self.v_lim = configDict['pusherVelLim']
-        self.x_length = configDict['xLenght']
-        self.y_length = configDict['yLenght']
-        self.Kx_max = configDict['Kx_max']
-        self.Ks_max = configDict['Ks_max']
-        self.Ks_min = configDict['Ks_min']
-        self.n_ctact = contactNum  # number of contacts (including the pusher)
+        self.psi_dot_lim = configDict['pusherAngleVelLim']
+        self.Kz_max = configDict['Kz_max']
+        self.Kz_min = configDict['Kz_min']
         #  -------------------------------------------------------------------
+        # vector of physical parameters
+        # self.beta = [self.xl, self.yl, self.r_pusher]
+        
+        # obstacles
+        self.Radius = 0.05
+        
         self.Nbeta = 3
         self.beta = cs.SX.sym('beta', self.Nbeta)
-        self.theta = cs.SX.sym('theta', 2)
-        self.ctact = cs.SX.sym('ctact', 3, 2)
-        self.vp = cs.SX.sym('vp', 2)
+        # beta[0] - xl
+        # beta[1] - yl
+        # beta[2] - r_pusher
+        #  -------------------------------------------------------------------
+        # self.psi_lim = 0.9*cs.arctan2(self.beta[0], self.beta[1])
+        if self.mode == 'sticking':
+            self.psi_lim = pusherAngleLim
+        else:
+            if self.face == '-x' or self.face == '+x':
+                self.psi_lim = configDict['xFacePsiLimit']
+            elif self.face == '-y' or self.face == '+y':
+                self.psi_lim = configDict['yFacePsiLimit']
+                # self.psi_lim = 0.405088
+                # self.psi_lim = 0.52
+
+        # system constant variables
+        self.Nx = 4  # number of state variables
+
+        # vectors of state and control
+        #  -------------------------------------------------------------------
+        # x - state vector
+        # x[0] - x slider CoM position in the global frame
+        # x[1] - y slider CoM position in the global frame
+        # x[2] - slider orientation in the global frame
+        # x[3] - angle of pusher relative to slider
+        self.x = cs.SX.sym('x', self.Nx)
+        # dx - derivative of the state vector
+        self.dx = cs.SX.sym('dx', self.Nx)
         #  -------------------------------------------------------------------
 
-        # variables
+        # auxiliar symbolic variables
+        # used to compute the symbolic representation for variables
         # -------------------------------------------------------------------
-        # contact force
-        __f_norm = cs.SX.sym('__f_norm', self.n_ctact)
-        __f_tan = cs.SX.sym('__f_tan', 2*self.n_ctact)
-        __f_ctact = cs.vertcat(__f_norm, __f_tan)
-        # -------------------------------------------------------------------
-        # auxiliary
-        __alpha = cs.SX.sym('__alpha', self.n_ctact)
-        __beta = cs.SX.sym('__beta', 2*self.n_ctact)
-        __lamda = cs.SX.sym('__lamda', self.n_ctact)
-        __gamma = cs.SX.sym('__gamma', self.n_ctact)
-        __aux = cs.vertcat(__alpha, __beta, __lamda, __gamma)
-        # -------------------------------------------------------------------
-        # pusher velicity
-        __vpx = cs.SX.sym('__vpx')
-        __vpy = cs.SX.sym('__vpy')
-        __vp = cs.vertcat(__vpx, __vpy)
-        # -------------------------------------------------------------------
-        # stack vector
-        self.w = cs.vertcat(__alpha, __beta, __gamma)
-        self.z = cs.vertcat(__f_ctact, __lamda)
-        # -------------------------------------------------------------------
-        
-        # system model
-        # -------------------------------------------------------------------
-        # geometry
+        # x - state vector
+        __x_slider = cs.SX.sym('__x_slider')  # in global frame [m]
+        __y_slider = cs.SX.sym('__y_slider')  # in global frame [m]
+        __theta = cs.SX.sym('__theta')  # in global frame [rad]
+        __psi = cs.SX.sym('__psi')  # in relative frame [rad]
+        __x = cs.veccat(__x_slider, __y_slider, __theta, __psi)
+        # u - control vector
+        __f_norm = cs.SX.sym('__f_norm')  # in local frame [N]
+        __f_tan = cs.SX.sym('__f_tan')  # in local frame [N]
+        # rel vel between pusher and slider [rad/s]
+        __psi_dot = cs.SX.sym('__psi_dot')
+        __u = cs.veccat(__f_norm, __f_tan, __psi_dot)
+        # beta - dynamic parameters
         __xl = cs.SX.sym('__xl')  # slider x lenght
         __yl = cs.SX.sym('__yl')  # slider y lenght
         __r_pusher = cs.SX.sym('__r_pusher')  # radious of the cilindrical pusher
-        __Beta = cs.veccat(__xl, __yl, __r_pusher)
-        # limit surface
+        __beta = cs.veccat(__xl, __yl, __r_pusher)
+
+        # system model
+        # -------------------------------------------------------------------
+        # Rotation matrix
         __Area = __xl*__yl
         __int_Area = sliding_pack.integral.rect_cs(__xl, __yl)
-        __c = __int_Area/__Area  # ellipsoid approximation ratio
+        __c = __int_Area/__Area # ellipsoid approximation ratio
+        self.c = cs.Function('c', [__x, __beta], [__c], ['x', 'b'], ['c'])
         __A = cs.SX.sym('__A', cs.Sparsity.diag(3))
         __A[0,0] = __A[1,1] = 1.; __A[2,2] = 1./(__c**2)
-        self.A = cs.Function('A', [__Beta], [__A], ['b'], ['A'])
-        # -------------------------------------------------------------------
-        # theta - state variables
-        __thetaA = cs.SX.sym('__thetaA')
-        __thetaB = cs.SX.sym('__thetaB')
-        __theta = cs.vertcat(__thetaA, __thetaB)
-        __dtheta = __thetaB - __thetaA
-        # R - rotation matrices
-        __RA, __RB = cs.SX(3, 3), cs.SX(3, 3)
-        __cthetaA = cs.cos(__thetaA); __sthetaA = cs.sin(__thetaA)
-        __RA[0,0] = __cthetaA; __RA[0,1] = -__sthetaA; __RA[1,0] = __sthetaA; __RA[1,1] = __cthetaA; __RA[2,2] = 1.0
-        __cthetaB = cs.cos(__thetaB); __sthetaB = cs.sin(__thetaB)
-        __RB[0,0] = __cthetaB; __RB[0,1] = -__sthetaB; __RB[1,0] = __sthetaB; __RB[1,1] = __cthetaB; __RB[2,2] = 1.0
-        self.RA = cs.Function('RA', [__thetaA], [__RA], ['t'], ['ra'])
-        self.RB = cs.Function('RB', [__thetaB], [__RB], ['t'], ['rb'])
-        # T - planar transformation matrices
-        # __TB2A = cs.mtimes(cs.inv(__RA[:2,:2]), __RB[:2,:2]); __TA2B = cs.mtimes(cs.inv(__RB[:2,:2]), __RA[:2,:2])
-        __TB2A, __TA2B = cs.SX(2, 2), cs.SX(2, 2)
-        __cdtheta = cs.cos(__dtheta); __sdtheta = cs.sin(__dtheta)
-        __TB2A[0,0] = __cdtheta; __TB2A[0,1] = -__sdtheta; __TB2A[1,0] = __sdtheta; __TB2A[1,1] = __cdtheta
-        __TA2B[0,0] = __cdtheta; __TA2B[0,1] = __sdtheta; __TA2B[1,0] = -__sdtheta; __TA2B[1,1] = __cdtheta
-        # -------------------------------------------------------------------
-
-        # contact jacobian
+        self.A = cs.Function('A', [__beta], [__A], ['b'], ['A'])
+        __ctheta = cs.cos(__theta)
+        __stheta = cs.sin(__theta)
+        __R = cs.SX(3, 3)  # anti-clockwise rotation matrix (from {Slider} to {World})
+        __R[0,0] = __ctheta; __R[0,1] = -__stheta; __R[1,0] = __stheta; __R[1,1] = __ctheta; __R[2,2] = 1.0;
         #  -------------------------------------------------------------------
-        # contact locations
-        # __xA0 = cs.SX.sym('__xA0'); __yA0 = cs.SX.sym('__yA0')
-        # __xA1 = cs.SX.sym('__xA1'); __yA1 = cs.SX.sym('__yA1')
-        # __xB0 = cs.SX.sym('__xB0'); __yB0 = cs.SX.sym('__yB0')
-        __xA0 = -__Beta[0]/2; __yA0 = cs.SX.sym('__yA0')
-        __xA1 = __Beta[0]/2; __yA1 = cs.SX.sym('__yA1')
-        __xB0 = -__Beta[0]/2; __yB0 = -__Beta[1]/2
-        __ctact = cs.SX(3, 2)
-        __ctact[0, 0] = __xA0; __ctact[0, 1] = __yA0
-        __ctact[1, 0] = __xA1; __ctact[1, 1] = __yA1
-        __ctact[2, 0] = __xB0; __ctact[2, 1] = __yB0
-        # contact jacobian
-        __JA0, __JA1, __JB0 = cs.SX(2, 3), cs.SX(2, 3), cs.SX(2, 3)
-        __JA0[0, 0] = 1; __JA0[1, 1] = 1; __JA0[0, 2] = -__yA0; __JA0[1, 2] = __xA0
-        __JA1[0, 0] = 1; __JA1[1, 1] = 1; __JA1[0, 2] = -__yA1; __JA1[1, 2] = __xA1
-        __JB0[0, 0] = 1; __JB0[1, 1] = 1; __JB0[0, 2] = -__yB0; __JB0[1, 2] = __xB0
+        self.R = cs.Function('R', [__x], [__R], ['x'], ['R'])  # (rotation matrix from {Slider} to {World})
         #  -------------------------------------------------------------------
-
-        # stacking matrix
+        __p = cs.SX.sym('p', 2) # pusher position
+        __rc_prov = cs.mtimes(__R[0:2,0:2].T, __p - __x[0:2])  # (Real {Pusher Center} in {Slider})
         #  -------------------------------------------------------------------
-        # auxiliary matrix
-        __K = cs.mtimes(cs.mtimes(cs.mtimes(__TB2A, __JB0), __A), cs.mtimes(__JB0.T, __TA2B))
-        # self.K = cs.Function('K', [__Beta, __ctact, __theta], [__K], ['b', 'c', 't'], ['K'])
+        # slider frame ({x} forward, {y} left)
+        # slider position
+        # if self.face == '-x':
+        __xc = -__xl/2; __yc = -(__xl/2)*cs.tan(__psi)  # ({Contact Point} in {Slider})
+        __rc = cs.SX(2,1); __rc[0] = __xc-__r_pusher; __rc[1] = __yc  # ({Pusher Center} in {Slider})
+        __ctact = cs.SX(2,1); __ctact[0] = __xc; __ctact[1] = __yc  # ({Contact Point} in {Slider})
         #  -------------------------------------------------------------------
-        # normal vectors
-        __nA0 = np.array([[1., 0.]])
-        __nA1 = np.array([[-1., 0.]])
-        __nB0 = np.array([[1., 0.]])
-        __N = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nA1, __JA1))
-        __Nv = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nA1, __JA1))
-        # tangent vectors
-        __DA0 = np.array([[0., 1.],
-                          [0., -1.]]).T
-        __DA1 = np.array([[0., -1.],
-                          [0., 1.]]).T
-        __DB0 = np.array([[0., 1.],
-                          [0., -1.]]).T
-        __L = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DA1.T, __JA1))
-        __Lv = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DA1.T, __JA1))
+        __psi_prov = -cs.atan2(__rc_prov[1], __xl/2)  # (Real {φ_c})
+        # elif self.face == '+x':
+        #     __xc = __xl/2; __yc = __xl/2*cs.tan(__psi)  # ({Contact Point} in {Slider})
+        #     __rc = cs.SX(2,1); __rc[0] = __xc+__r_pusher; __rc[1] = __yc  # ({Pusher Center} in {Slider})
+        #     #  -------------------------------------------------------------------
+        #     __psi_prov = -cs.atan2(__rc_prov[1], -__xl/2)  # (Real {φ_c})
+        # elif self.face == '-y' or self.face == '+y':
+        #     __xc = -(__yl/2)/cs.tan(__psi) if np.abs(__psi - 0.5 * np.pi) > 1e-3 else 0.; __yc = -__yl/2  # ({Contact Point} in {Slider})
+        #     __rc = cs.SX(2,1); __rc[0] = __xc; __rc[1] = __yc-__r_pusher  # ({Pusher Center} in {Slider})
+        #     #  -------------------------------------------------------------------
+        #     __psi_prov = -cs.atan2(__yl/2, __rc_prov[0]) + cs.pi  # (Real {φ_c})
+        # else:
+        #     __xc = (__yl/2)/cs.tan(__psi) if np.abs(__psi + 0.5 * np.pi) > 1e-3 else 0.; __yc = __yl/2  # ({Contact Point} in {Slider})
+        #     __rc = cs.SX(2,1); __rc[0] = __xc; __rc[1] = __yc+__r_pusher  # ({Pusher Center} in {Slider})
+        #     #  -------------------------------------------------------------------
+        #     __psi_prov = -cs.atan2(-__yl/2, __rc_prov[0]) - cs.pi  # (Real {φ_c})
+            
+        # pusher position
+        __p_pusher = cs.mtimes(__R[0:2,0:2], __rc)[0:2] + __x[0:2]  # ({Pusher Center} in {World})
+        __p_ctact = cs.mtimes(__R[0:2,0:2], __ctact)[0:2] + __x[0:2]  # ({Contact Point} in {World})
         #  -------------------------------------------------------------------
-        # sa, sb represented with fn, ft, the coefficient matrices are
+        self.psi_ = cs.Function('psi_', [__x,__p,__beta], [__psi_prov])  # compute (φ_c) from state variables, pusher coordinates and slider geometry
+        self.psi = cs.Function('psi', [self.x,__p,self.beta], [self.psi_(self.x, __p, self.beta)])
         #  -------------------------------------------------------------------
-        # selection matrix
-        __nsel = np.array([[0, 1],
-                           [0, 0]])
-        __tsel = np.array([[0, 0, 0, 0],
-                           [0, 0, 1, -1]])
-        __N1 = cs.SX(2, 2); __N1[0, :] = 0; __N1[1, :] = -cs.mtimes(__nA1, cs.mtimes(__K, __nsel))
-        __L1 = cs.SX(2, 4); __L1[0, :] = 0; __L1[1, :] = -cs.mtimes(__nA1, cs.mtimes(__K, __tsel))
-        __N2 = cs.SX(4, 2); __N2[:2, :] = 0; __N2[2:, :] = -cs.mtimes(__DA1.T, cs.mtimes(__K, __nsel))
-        __L2 = cs.SX(4, 4); __L2[:2, :] = 0; __L2[2:, :] = -cs.mtimes(__DA1.T, cs.mtimes(__K, __tsel))
+        self.p_ = cs.Function('p_', [__x,__beta], [__p_pusher], ['x', 'b'], ['p'])  # compute (pusher_center_coordinate) from state variables and slider geometry
+        self.p = cs.Function('p', [self.x, self.beta], [self.p_(self.x, self.beta)], ['x', 'b'], ['p'])
         #  -------------------------------------------------------------------
-        __E = np.kron(np.eye(2), np.ones((2, 1)))
-        __mu = self.miu * np.eye(2)
-        # __mu = np.diag([0.2, 0.5])
+        self.ctact_ = cs.Function('ctact_', [__x,__beta], [__ctact], ['x', 'b'], ['ctact'])
+        self.ctact = cs.Function('ctact', [__x,__beta], [self.ctact_(self.x, self.beta)], ['x', 'b'], ['ctact'])
+        self.p_ctact_ = cs.Function('p_ctact_', [__x,__beta], [__p_ctact], ['x', 'b'], ['p_ctact'])  # compute (pusher_center_coordinate) from state variables and slider geometry
+        self.p_ctact = cs.Function('p_ctact', [self.x, self.beta], [self.p_ctact_(self.x, self.beta)], ['x', 'b'], ['p_ctact'])
+        #  -------------------------------------------------------------------
+        self.s = cs.Function('s', [self.x], [self.x[0:3]], ['x'], ['s'])  # compute (x, y, θ) from state variables
+        #  -------------------------------------------------------------------
+        
+        # dynamics
+        __Jc = cs.SX(2,3)
+        # if self.face == '-x':
+        __Jc[0,0] = 1; __Jc[1,1] = 1; __Jc[0,2] = -__yc; __Jc[1,2] = __xc;  # contact jacobian
+        # elif self.face == '+x':
+        #     __Jc[0,0] = -1; __Jc[1,1] = -1; __Jc[0,2] = __yc; __Jc[1,2] = -__xc;  # contact jacobian
+        # elif self.face == '-y':
+        #     __Jc[0,1] = -1; __Jc[1,0] = 1; __Jc[0,2] = __xc; __Jc[1,2] = __yc;  # contact jacobian
+        # else:
+        #     __Jc[0,1] = 1; __Jc[1,0] = -1; __Jc[0,2] = -__xc; __Jc[1,2] = -__yc;  # contact jacobian
+        
+        self.RAJc = cs.Function('RAJc', [__x,__beta], [cs.mtimes(cs.mtimes(__R, __A), __Jc.T)], ['x', 'b'], ['f'])
+        __f = cs.SX(cs.vertcat(cs.mtimes(cs.mtimes(__R,__A),cs.mtimes(__Jc.T,__u[0:2])),__u[2]))
+        #  -------------------------------------------------------------------
+        self.f_ = cs.Function('f_', [__x,__u,__beta], [__f], ['x', 'u', 'b'], ['f'])  # compute (f(x, u)) from state variables, input variables and slider geometry
         #  -------------------------------------------------------------------
 
-        # lcp problems (wiki: https://en.wikipedia.org/wiki/Linear_complementarity_problem#cite_note-FOOTNOTEFukudaNamiki1994-6)
+        # control constraints
         #  -------------------------------------------------------------------
-        __M = cs.SX(4*self.n_ctact, 4*self.n_ctact)
+        if self.mode == 'sliding_cc':
+            # complementary constraint
+            # u - control vector
+            # u[0] - normal force in the local frame
+            # u[1] - tangential force in the local frame
+            # u[2] - rel sliding vel between pusher and slider counterclockwise(φ_c(-))
+            # u[3] - rel sliding vel between pusher and slider clockwise(φ_c(+))
+            self.Nu = 4  # number of action variables
+            self.u = cs.SX.sym('u', self.Nu)
+            self.Nz = 0
+            self.z0 = []
+            self.lbz = []
+            self.ubz = []
+            # discrete extra variable
+            self.z_discrete = False
+            empty_var = cs.SX.sym('empty_var')
+            self.g_u = cs.Function('g_u', [self.u, empty_var], [cs.vertcat(
+                # friction cone edges
+                self.miu*self.u[0]+self.u[1],  # lambda(+)>=0
+                self.miu*self.u[0]-self.u[1],  # lambda(-)>=0
+                # complementarity constraint
+                (self.miu * self.u[0] - self.u[1])*self.u[3],  # lambda(-)*φ_c(+)=0
+                (self.miu * self.u[0] + self.u[1])*self.u[2]  # lambda(+)*φ_c(-)=0
+            )], ['u', 'other'], ['g'])
+            self.g_lb = [0., 0., 0., 0.]
+            self.g_ub = [cs.inf, cs.inf, 0., 0.]
+            self.Ng_u = 4
+            # cost gain for extra variable
+            __Ks_max = self.Kz_max
+            __Ks_min = self.Kz_min
+            __i_th = cs.SX.sym('__i_th')
+            self.kz_f = cs.Function('ks', [__i_th], [__Ks_max * cs.exp(__i_th * cs.log(__Ks_min / __Ks_max))])  # decrease from Ks_max to Ks_min
+            # state and acton limits
+            #  -------------------------------------------------------------------
+            self.lbx = [-cs.inf, -cs.inf, -cs.inf, -self.psi_lim]
+            self.ubx = [cs.inf, cs.inf, cs.inf, self.psi_lim]
+            self.lbu = [0.0,  -self.f_lim, 0.0, 0.0]
+            self.ubu = [self.f_lim, self.f_lim, self.psi_dot_lim, self.psi_dot_lim]
+            #  -------------------------------------------------------------------
+            # dynamics equation
+            self.f = cs.Function('f', [self.x, self.u, self.beta], [self.f_(self.x, cs.vertcat(self.u[0:2], self.u[2]-self.u[3]), self.beta)],  ['x', 'u', 'b'], ['f'])
+        elif self.mode == 'sliding_cc_slack':
+            # complementary constraint + slack variables
+            # u - control vector
+            # u[0] - normal force in the local frame
+            # u[1] - tangential force in the local frame
+            # u[2] - rel sliding vel between pusher and slider counterclockwise
+            # u[3] - rel sliding vel between pusher and slider clockwise
+            self.Nu = 4  # number of action variables
+            self.u = cs.SX.sym('u', self.Nu)
+            self.Nz = 2
+            self.z = cs.SX.sym('z', self.Nz)
+            self.z0 = [1.]*self.Nz
+            self.lbz = [-cs.inf]*self.Nz
+            self.ubz = [cs.inf]*self.Nz
+            # discrete extra variable
+            self.z_discrete = False
+            self.g_u = cs.Function('g_u', [self.u, self.z], [cs.vertcat(
+                # friction cone edges
+                self.miu*self.u[0]+self.u[1],
+                self.miu*self.u[0]-self.u[1],
+                # complementarity constraint
+                (self.miu * self.u[0] - self.u[1])*self.u[3] + self.z[0],
+                (self.miu * self.u[0] + self.u[1])*self.u[2] + self.z[1]
+            )], ['u', 'other'], ['g'])
+            self.g_lb = [0., 0., 0., 0.]
+            self.g_ub = [cs.inf, cs.inf, 0., 0.]
+            self.Ng_u = 4
+            # cost gain for extra variable
+            __Ks_max = self.Kz_max
+            __Ks_min = self.Kz_min
+            __i_th = cs.SX.sym('__i_th')
+            self.kz_f = cs.Function('ks', [__i_th], [__Ks_max * cs.exp(__i_th * cs.log(__Ks_min / __Ks_max))])
+            # state and acton limits
+            #  -------------------------------------------------------------------
+            self.lbx = [-cs.inf, -cs.inf, -cs.inf, -self.psi_lim]
+            self.ubx = [cs.inf, cs.inf, cs.inf, self.psi_lim]
+            self.lbu = [0.0,  -self.f_lim, 0.0, 0.0]
+            self.ubu = [self.f_lim, self.f_lim, self.psi_dot_lim, self.psi_dot_lim]
+            #  -------------------------------------------------------------------
+            # dynamics equation
+            self.f = cs.Function('f', [self.x, self.u, self.beta], [self.f_(self.x, cs.vertcat(self.u[0:2], self.u[2]-self.u[3]), self.beta)],  ['x', 'u', 'b'], ['f'])
+        elif self.mode == 'sliding_mi':
+            # mixed integer
+            # u - control vector
+            # u[0] - normal force in the local frame
+            # u[1] - tangential force in the local frame
+            # u[2] - rel sliding vel between pusher and slider
+            self.Nu = 3  # number of action variables
+            self.u = cs.SX.sym('u', self.Nu)
+            self.Nz = 3
+            self.z = cs.SX.sym('z', self.Nz)
+            self.z0 = [0]*self.Nz
+            self.lbz = [0]*self.Nz
+            self.ubz = [1]*self.Nz
+            # discrete extra variable
+            self.z_discrete = True
+            self.Ng_u = 7
+            bigM = 500  # big M for the Mixed Integer optimization
+            self.g_u = cs.Function('g_u', [self.u, self.z], [cs.vertcat(
+                self.miu*self.u[0]+self.u[1] + bigM*self.z[1],  # friction cone edge
+                self.miu*self.u[0]-self.u[1] + bigM*self.z[2],  # friction cone edge
+                self.miu*self.u[0]+self.u[1] - bigM*(1-self.z[2]),  # friction cone edge
+                self.miu*self.u[0]-self.u[1] - bigM*(1-self.z[1]),  # friction cone edge
+                self.u[2] + bigM*self.z[2],  # relative rot constraint
+                self.u[2] - bigM*self.z[1],
+                cs.sum1(self.z),  # sum of the integer variables
+            )], ['u', 'other'], ['g'])
+            self.g_lb = [0., 0., -cs.inf, -cs.inf, 0., -cs.inf, 1.]
+            self.g_ub = [cs.inf, cs.inf, 0., 0., cs.inf, 0., 1.]
+            __i_th = cs.SX.sym('__i_th')
+            self.kz_f = cs.Function('ks', [__i_th], [0.])
+            # state and acton limits
+            #  -------------------------------------------------------------------
+            self.lbx = [-cs.inf, -cs.inf, -cs.inf, -self.psi_lim]
+            self.ubx = [cs.inf, cs.inf, cs.inf, self.psi_lim]
+            self.lbu = [0.0,  -self.f_lim, 0.0]
+            self.ubu = [self.f_lim, self.f_lim, self.psi_dot_lim]
+            #  -------------------------------------------------------------------
+            # dynamics equation
+            self.f = cs.Function('f', [self.x, self.u, self.beta], [self.f_(self.x, self.u, self.beta)],  ['x', 'u', 'b'], ['f'])
+        elif self.mode == 'sticking':
+            # sticking constraint
+            # u - control vector
+            # u[0] - normal force in the local frame
+            # u[1] - tangential force in the local frame
+            self.Nu = 2  # number of action variables
+            self.u = cs.SX.sym('u', self.Nu)
+            empty_var = cs.SX.sym('empty_var')
+            self.g_u = cs.Function('g_u', [self.u, empty_var], [cs.vertcat(
+                self.miu*self.u[0]+self.u[1],  # friction cone edge
+                self.miu*self.u[0]-self.u[1]  # friction cone edge
+            )], ['u', 'other'], ['g'])
+            self.g_lb = [0.0, 0.0]
+            self.g_ub = [cs.inf, cs.inf]
+            self.Nz = 0
+            self.z0 = []
+            self.lbz = []
+            self.ubz = []
+            # discrete extra variable
+            self.z_discrete = False
+            self.Ng_u = 2
+            # state and acton limits
+            #  -------------------------------------------------------------------
+            self.lbx = [-cs.inf, -cs.inf, -cs.inf, self.psi_lim]
+            self.ubx = [cs.inf, cs.inf, cs.inf, self.psi_lim]
+            self.lbu = [0.0,  -self.f_lim]
+            self.ubu = [self.f_lim, self.f_lim]
+            #  -------------------------------------------------------------------
+            # dynamics equation
+            self.f = cs.Function('f', [self.x, self.u, self.beta], [self.f_(self.x, cs.vertcat(self.u, 0.0), self.beta)],  ['x', 'u', 'b'], ['f'])
+        else:
+            print('Specified mode ``{}`` does not exist!'.format(self.mode))
+            sys.exit(-1)
+        #  -------------------------------------------------------------------
 
-        __M[:self.n_ctact, :self.n_ctact] = cs.mtimes(__Nv, cs.mtimes(__A, __N.T)) + __N1
-        __M[:self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.mtimes(__Nv, cs.mtimes(__A, __L.T)) + __L1
-        __M[:self.n_ctact, 3*self.n_ctact:] = 0
-
-        __M[self.n_ctact: 3*self.n_ctact, :self.n_ctact] = cs.mtimes(__Lv, cs.mtimes(__A, __N.T)) + __N2
-        __M[self.n_ctact: 3*self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.mtimes(__Lv, cs.mtimes(__A, __L.T)) + __L2
-        __M[self.n_ctact: 3*self.n_ctact, 3*self.n_ctact:] = __E
-
-        __M[3*self.n_ctact:, :self.n_ctact] = __mu
-        __M[3*self.n_ctact:, self.n_ctact: 3*self.n_ctact] = -__E.T
-        __M[3*self.n_ctact:, 3*self.n_ctact:] = 0
-        #  -------------------------------------------------------------------
-        __sa = cs.vertcat(-cs.mtimes(__nA0, __vp), 0)
-        __sb = cs.vertcat(-cs.mtimes(__DA0.T, __vp), 0, 0)
-        __q = cs.vertcat(__sa, __sb, 0, 0)
-        #  -------------------------------------------------------------------
-        self.M_ = cs.Function('M_', [__Beta, __theta, __yA0, __yA1],
-                              [__M], ['b', 't', 'ya0', 'ya1'], ['M_'])
-        self.M_opt_ = self.M_
-        self.M = cs.Function('M', [self.beta, self.theta, self.ctact],
-                             [self.M_(self.beta, self.theta, self.ctact[0,1], self.ctact[1,1])], ['b', 't', 'c'], ['M'])
-        self.q_ = cs.Function('q_', [__vp], [__q], ['v'], ['q'])
-        self.q_opt_ = self.q_
-        self.q = cs.Function('q', [self.vp], [self.q_(self.vp)], ['v'], ['q'])
-        #  -------------------------------------------------------------------
-
-        # dynamic functions
-        #  -------------------------------------------------------------------
-        # sliderA, sliderB wrench
-        __wrenchA = cs.mtimes(__N.T, __f_norm) + cs.mtimes(__L.T, __f_tan)
-        __wrenchB = cs.mtimes(__JB0.T,cs.mtimes(__TA2B,cs.mtimes(__nsel,__f_norm)+cs.mtimes(__tsel,__f_tan)))
-        self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__wrenchA], ['b', 't', 'ya0', 'ya1', 'f'], ['wA_'])
-        self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__wrenchB], ['b', 't', 'ya0', 'ya1', 'f'], ['wB_'])
-        self.wrenchA = cs.Function('wrenchA', [self.beta,self.theta,self.ctact,self.z],
-                                   [self.wrenchA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
-        self.wrenchB = cs.Function('wrenchB', [self.beta,self.theta,self.ctact,self.z],
-                                   [self.wrenchB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
-        # sliderA twist
-        __VA = cs.mtimes(__A, __wrenchA)
-        __VB = cs.mtimes(__A, __wrenchB)
-        self.VA_ = cs.Function('VA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__VA], ['b', 't', 'ya0', 'ya1', 'f'], ['VA_'])
-        self.VB_ = cs.Function('VB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__VB], ['b', 't', 'ya0', 'ya1', 'f'], ['VB_'])
-        self.VA = cs.Function('VA', [self.beta,self.theta,self.ctact,self.z],
-                              [self.VA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VA'])
-        self.VB = cs.Function('VB', [self.beta,self.theta,self.ctact,self.z],
-                              [self.VB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VB'])
-        # slider pose
-        __fA = cs.mtimes(__RA,__VA)
-        __fB = cs.mtimes(__RB,__VB)
-        self.fA_ = cs.Function('fA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__fA], ['b', 't', 'ya0', 'ya1', 'c'], ['fa_'])
-        self.fB_ = cs.Function('fB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__fB], ['b', 't', 'ya0', 'ya1', 'c'], ['fb_'])
-        self.fA = cs.Function('fA', [self.beta, self.theta, self.ctact, self.z],
-                            [self.fA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fa'])
-        self.fB = cs.Function('fB', [self.beta, self.theta, self.ctact, self.z],
-                            [self.fB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fb'])
-        # pusher
-        __fvp = __vp-cs.mtimes(__JA0,__VA)
-        self.fvp_ = cs.Function('fvp_', [__Beta,__theta,__yA0,__yA1,__f_ctact,__vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'ya0', 'ya1', 'f', 'v'], ['fp_'])
-        self.fvp = cs.Function('fvp', [self.beta,self.theta,self.ctact,self.z,self.vp],
-                                [self.fvp_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6],self.vp)], ['b', 't', 'c', 'z', 'v'], ['fp'])
-        #  -------------------------------------------------------------------
-
-        # other matrices for debug
-        #  -------------------------------------------------------------------
-        __F = cs.mtimes(__JA0.T, __f_norm[0]*__nA0.T + cs.mtimes(__DA0, __f_tan[0:2])) + \
-              cs.mtimes(__JA1.T, __f_norm[1]*__nA1.T + cs.mtimes(__DA1, __f_tan[2:4]))
-        self.F_ = cs.Function('F_', [__yA0,__yA1,__f_ctact], [__F], ['ya0', 'ya1','f'], ['F_'])
-        self.F = cs.Function('F', [self.ctact,self.z], [self.F_(self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['c', 'f'], ['F'])
-        #  -------------------------------------------------------------------
-        self.V_ = cs.Function('V_', [__Beta,__yA0,__yA1,__f_ctact], [__VA], ['b', 'ya0', 'ya1', 'f'], ['V_'])
-        self.V = cs.Function('V', [self.beta,self.ctact,self.z], [self.V_(self.beta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 'c', 'f'], ['V'])
-        #  -------------------------------------------------------------------
-        __vpB = cs.mtimes(__K, cs.mtimes(__nsel, __f_norm) + cs.mtimes(__tsel, __f_tan))-cs.mtimes(__JA1,__VA)
-        self.vpB_ = cs.Function('vpB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'ya0', 'ya1', 'f'], ['v'])
-        self.vpB = cs.Function('vpB', [self.beta,self.theta,self.ctact,self.z], 
-                               [self.vpB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
-        #  -------------------------------------------------------------------
-        self.N_ = cs.Function('N_', [__yA0,__yA1], [__N], ['ya0', 'ya1'], ['N_'])
-        self.N = cs.Function('N', [self.ctact], [self.N_(self.ctact[0,1],self.ctact[1,1])], ['c'], ['N'])
-        self.L_ = cs.Function('L_', [__yA0,__yA1], [__L], ['ya0', 'ya1'], ['L_'])
-        self.L = cs.Function('L', [self.ctact], [self.L_(self.ctact[0,1],self.ctact[1,1])], ['c'], ['L'])
-        #  -------------------------------------------------------------------
-        
-        # define symbols for building optimization problems
-        #  -------------------------------------------------------------------
-        self.Nx = 3
-        self.x_opt = cs.SX.sym('x', self.Nx)
-        self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -cs.inf]
-        self.ubx = [0.5*self.y_length, 0.5*self.y_length, cs.inf]
-        
-        __dx = cs.SX(3,1)
-        __dx[0] = cs.mtimes(np.expand_dims(__DA0[:,0], axis=0), __vp - cs.mtimes(__JA0, __VA))
-        __dx[1] = cs.mtimes(np.expand_dims(__DA1[:,1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
-        __dx[2] = (__VB - __VA)[2]
-        
-        self.Nu = 2
-        self.u_opt = cs.SX.sym('u', self.Nu)
-        self.lbu = [0., -self.v_lim]
-        self.ubu = [self.v_lim, self.v_lim]
-        
-        # complementary variables
-        self.Nz = 8
-        self.z_opt = cs.SX.sym('z', self.Nz)
-        self.lbz = [0.]*self.Nz
-        self.ubz = [self.f_lim]*(self.Nz-2)+[cs.inf]*2
-        self.Nw = 8
-        self.w_opt = cs.SX.sym('w', self.Nw)
-        self.lbw = [0.]*self.Nw
-        self.ubw = [cs.inf]*self.Nw
-        
-        # slack variables
-        self.Ns = 8
-        self.s_opt = cs.SX.sym('s', self.Ns)
-        self.s0 = [1.]*self.Ns
-        self.lbs = [-1e-7]*self.Ns
-        self.ubs = [1e-7]*self.Ns
-
-        self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1])], ['b', 'x'], ['M_opt'])
-        self.q_opt = cs.Function('q_opt', [self.u_opt], [self.q_opt_(self.u_opt)], ['u'], ['q_opt'])
-        
-        self.f_opt_ = cs.Function('f_opt_', [__Beta, __theta, __yA0, __yA1, __vp, __f_ctact], [__dx], ['b', 't', 'ya0', 'ya1', 'vp', 'f'], ['f_opt_'])
-        self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
-                                 [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], self.u_opt, self.z_opt[:6])],
-                                 ['b', 'x', 'u', 'z'], ['f_opt'])
-        
-        # (complementary) constraints
-        self.Ng_u = 8
-        g_zw_ = self.z_opt[0]*self.w_opt[0] + self.s_opt[0]
-        for i in range(1, self.Ng_u):
-            g_zw_ = cs.vertcat(g_zw_, self.z_opt[i]*self.w_opt[i] + self.s_opt[i])
-        self.g_zw = cs.Function('g_u', [self.z_opt, self.w_opt, self.s_opt], [g_zw_], ['z', 'w', 's'], ['g'])
-        self.g_lb = [0.]*self.Ng_u
-        self.g_ub = [0.]*self.Ng_u
-        
-        # cost gain for state variable
-        __i_th = cs.SX.sym('__i_th')
-        __Kx_max = self.Kx_max
-        self.kx_f = cs.Function('kx', [__i_th], [__Kx_max * (1. / __i_th)])
-        
-        # cost gain for slack variable
-        __Ks_max = self.Ks_max
-        __Ks_min = self.Ks_min
-        self.ks_f = cs.Function('ks', [__i_th], [__Ks_max * cs.exp(__i_th * cs.log(__Ks_min / __Ks_max))])
-        #  -------------------------------------------------------------------
-        
-    def set_patches(self, ax, x_a_data, x_b_data, x_c_data, beta):
+    def set_patches(self, ax, x_data, beta, vis_flatness=False, u_data=None):
         """
         :param vis_flatness: visualize auxiliary lines for differential flatness or not
         """
         Xl = beta[0]
         Yl = beta[1]
         R_pusher = beta[2]
-        x_a0 = x_a_data[:, 0]
-        x_b0 = x_b_data[:, 0]
-        
-        R_a0 = np.eye(3)
-        d_a0 = R_a0.dot(np.array([-Xl/2., -Yl/2., 0]))        
-        R_b0 = np.eye(3)
-        d_b0 = R_b0.dot(np.array([-Xl/2., -Yl/2., 0]))
-        
-        x_c0 = x_a0[:2] + R_a0[:2, :2] @ x_c_data[:, 0]
-        d_c0 = R_a0.dot(np.array([-R_pusher, 0., 0.]))
-        
-        self.slider_a = patches.Rectangle(
-                x_a0[0:2]+d_a0[0:2], Xl, Yl, angle=0.0)
-        self.slider_b = patches.Rectangle(
-                x_b0[0:2]+d_b0[0:2], Xl, Yl, angle=0.0)
-        
+        x0 = x_data[:, 0]
+        # R0 = np.array(self.R(x0))
+        R0 = np.eye(3)
+        d0 = R0.dot(np.array([-Xl/2., -Yl/2., 0]))
+        self.slider = patches.Rectangle(
+                x0[0:2]+d0[0:2], Xl, Yl, angle=0.0)
         self.pusher = patches.Circle(
-                x_c0[0:2]+d_c0[0:2], radius=R_pusher, color='black')
-        
-        # self.path_past, = ax.plot(x0[0], x0[1], color='orange')
-        # self.path_future, = ax.plot(x0[0], x0[1],
-        #         color='orange', linestyle='dashed')
-        # self.cor = patches.Circle(
-        #         np.array([0, 0]), radius=0.002, color='deepskyblue')
-        
-        ax.add_patch(self.slider_a)
-        ax.add_patch(self.slider_b)
+                np.array(self.p(x0, beta)), radius=R_pusher, color='black')
+        self.path_past, = ax.plot(x0[0], x0[1], color='orange')
+        self.path_future, = ax.plot(x0[0], x0[1],
+                color='orange', linestyle='dashed')
+        self.cor = patches.Circle(
+                np.array([0, 0]), radius=0.002, color='deepskyblue')
+        ax.add_patch(self.slider)
         ax.add_patch(self.pusher)
-        
-        # ax.add_patch(self.cor)
-        # self.path_past.set_linewidth(2)
-        
-    def animate(self, i, ax, x_a_data, x_b_data, x_c_data, beta, X_future=None):
+        ax.add_patch(self.cor)
+        self.path_past.set_linewidth(2)
+
+        # Set auxiliary lines
+        if vis_flatness:
+            # set the lines
+            self.mid_axis, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.flat_line, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.othog_line, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.force_line, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.mid_axis.set_linewidth(2.0)
+            self.flat_line.set_linewidth(2.0)
+            self.othog_line.set_linewidth(2.0)
+            self.force_line.set_linewidth(2.0)
+
+            # self.COG = ax.scatter(0, 0, marker='o')
+
+    def animate(self, i, ax, x_data, beta, vis_flatness=False, u_data=None, X_future=None):
         Xl = beta[0]
         Yl = beta[1]
-        R_pusher = beta[2]
-        x_ai = x_a_data[:, i]
-        x_bi = x_b_data[:, i]
+        xi = x_data[:, i]
         # distance between centre of square reference corner
-        R_ai = np.array(self.RA(x_ai[2]))
-        R_bi = np.array(self.RB(x_bi[2]))
-        d_ai = R_ai.dot(np.array([-Xl/2, -Yl/2, 0]))
-        d_bi = R_bi.dot(np.array([-Xl/2, -Yl/2, 0]))
-        x_ci = x_ai[:2] + R_ai[:2, :2] @ x_c_data[:, i]
-        d_ci = R_ai.dot(np.array([-R_pusher, 0., 0.]))
+        Ri = np.array(self.R(xi))
+        di = Ri.dot(np.array([-Xl/2, -Yl/2, 0]))
         # square reference corner
-        c_ai = x_ai[0:3] + d_ai
-        c_bi = x_bi[0:3] + d_bi
-        c_ci = x_ci[:2] + d_ci[:2]
+        ci = xi[0:3] + di
         # compute transformation with respect to rotation angle xi[2]
-        trans_a_ax = ax.transData
-        coords_a = trans_a_ax.transform(c_ai[0:2])
-        trans_ai = transforms.Affine2D().rotate_around(
-                coords_a[0], coords_a[1], x_ai[2])
-        trans_b_ax = ax.transData
-        coords_b = trans_b_ax.transform(c_bi[0:2])
-        trans_bi = transforms.Affine2D().rotate_around(
-                coords_b[0], coords_b[1], x_bi[2])
+        trans_ax = ax.transData
+        coords = trans_ax.transform(ci[0:2])
+        trans_i = transforms.Affine2D().rotate_around(
+                coords[0], coords[1], xi[2])
         # Set changes
-        self.slider_a.set_transform(trans_a_ax+trans_ai)
-        self.slider_a.set_xy([c_ai[0], c_ai[1]])
-        self.slider_b.set_transform(trans_b_ax+trans_bi)
-        self.slider_b.set_xy([c_bi[0], c_bi[1]])
-        self.pusher.set_center(c_ci)
-        
+        self.slider.set_transform(trans_ax+trans_i)
+        self.slider.set_xy([ci[0], ci[1]])
+        self.pusher.set_center(np.array(self.p(xi, beta)))
         # Set path changes
-        # if self.path_past is not None:
-        #     self.path_past.set_data(x_data[0, 0:i], x_data[1, 0:i])
-        # if (self.path_future is not None) and (X_future is not None):
-        #     self.path_future.set_data(X_future[0, :, i], X_future[1, :, i])
-            
+        if self.path_past is not None:
+            self.path_past.set_data(x_data[0, 0:i], x_data[1, 0:i])
+        if (self.path_future is not None) and (X_future is not None):
+            self.path_future.set_data(X_future[0, :, i], X_future[1, :, i])
+
+        # Set auxiliary lines
+        if vis_flatness:
+            # Set auxiliary lines
+            ab_ratio = (self.A(beta)[0, 0] / self.A(beta)[2, 2]).toarray().squeeze()
+            ui = u_data[:, i]
+            fn = ui[0]; ft = ui[1]
+            ctact_pt = self.ctact_(xi, beta).toarray().squeeze()
+            xc = ctact_pt[0]; yc = ctact_pt[1]  # contact point
+            r = np.sqrt(xc ** 2 + yc ** 2)
+            xt = -ab_ratio * xc / (r ** 2); yt = -ab_ratio * yc / (r ** 2)  # the intersection of central axis and differential flatness line
+            # general form of line: Ax + By = C
+            # parameter [A, B] of general formalized auxiliary line
+            param_AB = np.array([[xc, yc],
+                                 [yc, -xc],
+                                 [fn, ft],
+                                 [ft, -fn]])
+            # parameter [C] of general formalized auxiliary line
+            param_C = np.array([[xt * xc + yt * yc],
+                                [0],
+                                [0],
+                                [xc * ft - yc * fn]])
+            # key points
+            Ri_xy = Ri[:2, :2]
+            cor_pt = Ri_xy @ np.linalg.inv(param_AB[[0, 2], :]) @ param_C[[0, 2], :].squeeze() + xi[:2] # center of rotation (COR)
+            force_pt = Ri_xy @ np.linalg.inv(param_AB[[2, 3], :]) @ param_C[[2, 3], :].squeeze() + xi[:2]  # point on the line of force
+            ctact_pt = Ri_xy @ np.array([xc, yc]) + xi[:2]  # contact point
+            tilde_pt = Ri_xy @ np.array([xt, yt]) + xi[:2]  # the intersection of central axis and differential flatness line
+            # set the lines
+            self.mid_axis.set_data([ctact_pt[0], tilde_pt[0]], [ctact_pt[1], tilde_pt[1]])
+            self.flat_line.set_data([tilde_pt[0], cor_pt[0]], [tilde_pt[1], cor_pt[1]])
+            self.othog_line.set_data([force_pt[0], cor_pt[0]], [force_pt[1], cor_pt[1]])
+            self.force_line.set_data([force_pt[0], ctact_pt[0]], [force_pt[1], ctact_pt[1]])
+            self.cor.set_center(np.array([cor_pt[0], cor_pt[1]]))
+            print(cor_pt)
+            # # set the slider's center
+            # self.COG.set_xy(xi[0], xi[1])
         return []
+    #  -------------------------------------------------------------------
 
 # -------------------------------------------------------------------
 
-# if __name__ == '__main__':
-#     planning_config = sliding_pack.load_config('planning_config.yaml')
-#     dyn = Double_Sys_sq_slider_quasi_static_ellip_lim_surf(planning_config['dynamics'], contactNum=2)
-#     import pdb; pdb.set_trace()
+class Aug_Sys_sq_slider_quasi_static_ellip_lim_surf():
+    # The augmented dynamic model for single-pusher-multiple-slider.
+    # The dynamic model is under quasi-static assumption.
+    # The dynamic model is approximated by an ellipsoid.
+    # The contacts between adjacent sliders are assumed to be sticking.
+    def __init__(self, configDict, contactMode='sticking', contactFace='-x', pusherAngleLim=0., sliderRelAngleLim=0., beta=None):
+
+        # init parameters
+        self.mode = contactMode
+        self.face = contactFace
+        # self.sl = configDict['sideLenght']  # side dimension of the square slider [m]
+        self.miu = configDict['pusherFricCoef']  # fric between pusher and slider
+        self.f_lim = configDict['pusherForceLim']
+        self.psi_dot_lim = configDict['pusherAngleVelLim']
+        self.Kz_max = configDict['Kz_max']
+        self.Kz_min = configDict['Kz_min']
+        #  -------------------------------------------------------------------
+        # vector of physical parameters
+        # self.beta = [self.xl, self.yl, self.r_pusher]
+        
+        # obstacles
+        self.Radius = 0.05
+        
+        self.Nbeta = 3
+        self.beta = cs.SX.sym('beta', self.Nbeta)  # symbolic beta
+        # beta[0] - xl
+        # beta[1] - yl
+        # beta[2] - r_pusher
+        #  -------------------------------------------------------------------
+        # self.psi_lim = 0.9*cs.arctan2(self.beta[0], self.beta[1])
+        if self.mode == 'sticking':
+            self.psi_lim = pusherAngleLim
+        else:
+            if self.face == '-x' or self.face == '+x':
+                self.psi_lim = configDict['xFacePsiLimit']
+            elif self.face == '-y' or self.face == '+y':
+                self.psi_lim = configDict['yFacePsiLimit']
+                # self.psi_lim = 0.405088
+                # self.psi_lim = 0.52
+        self.psi_r_lim = sliderRelAngleLim
+
+        # initialize beta, when numerizing some symbols, it is used
+        try:
+            assert beta is not None
+            self.beta_eval = beta  # numerical beta
+        except:
+            print('Beta should be assigned a value for further numerization!')
+            sys.exit(-1)
+
+        # system constant variables
+        self.Nx = 8  # number of state variables
+
+        # vectors of state and control
+        #  -------------------------------------------------------------------
+        # x - state vector
+        # x[0] - x slider1 CoM position in the global frame
+        # x[1] - y slider1 CoM position in the global frame
+        # x[2] - slider1 orientation in the global frame
+        # x[3] - angle of pusher relative to slider1
+        # x[4] - x slider2 CoM position in the global frame
+        # x[5] - y slider2 CoM position in the global frame
+        # x[6] - slider2 orientation in the global frame
+        # x[7] - angle of slider2 relative to slider1
+        self.x = cs.SX.sym('x', self.Nx)
+        # dx - derivative of the state vector
+        self.dx = cs.SX.sym('dx', self.Nx)
+        #  -------------------------------------------------------------------
+
+        # auxiliar symbolic variables
+        # used to compute the symbolic representation for variables
+        # -------------------------------------------------------------------
+        # x - state vector
+        __x_slider1 = cs.SX.sym('__x_slider1')  # in global frame [m]
+        __y_slider1 = cs.SX.sym('__y_slider1')  # in global frame [m]
+        __theta1 = cs.SX.sym('__theta1')  # in global frame [rad]
+        __psi_c = cs.SX.sym('__psi_c')  # in slider1 frame [rad]
+        __x_slider2 = cs.SX.sym('__x_slider2')  # in global frame [m]
+        __y_slider2 = cs.SX.sym('__y_slider2')  # in global frame [m]
+        __theta2 = cs.SX.sym('__theta2')  # in global frame [rad]
+        __psi_r = cs.SX.sym('__psi_r')  # in slider1 frame [rad]
+        __x = cs.veccat(__x_slider1, __y_slider1, __theta1, __psi_c, __x_slider2, __y_slider2, __theta2, __psi_r)
+        # u - control vector
+        __f_norm = cs.SX.sym('__f_norm')  # in slider1 frame [N]
+        __f_tan = cs.SX.sym('__f_tan')  # in slider1 frame [N]
+        # uL - auxiliar control vector, corresponding to the left contact point on slider1
+        __fL_norm = cs.SX.sym('__fL_norm')  # in slider1 frame [N]
+        __fL_tan = cs.SX.sym('__fL_tan')  # in slider1 frame [N]
+        # uR - auxiliar control vector, corresponding to the right contact point on slider1
+        __fR_norm = cs.SX.sym('__fR_norm')  # in slider1 frame [N]
+        __fR_tan = cs.SX.sym('__fR_tan')  # in slider1 frame [N]
+        # rel vel between pusher and slider [rad/s]
+        __psi_dot = cs.SX.sym('__psi_dot')
+        __u = cs.veccat(__f_norm, __f_tan, __psi_dot, __fL_norm, __fL_tan, __fR_norm, __fR_tan)
+        # beta - dynamic parameters
+        __xl = cs.SX.sym('__xl')  # slider x lenght
+        __yl = cs.SX.sym('__yl')  # slider y lenght
+        __r_pusher = cs.SX.sym('__r_pusher')  # radious of the cilindrical pusher
+        __beta = cs.veccat(__xl, __yl, __r_pusher)
+
+        # system model
+        # -------------------------------------------------------------------
+        # Rotation matrix
+        __Area = __xl*__yl
+        __int_Area = sliding_pack.integral.rect_cs(__xl, __yl)
+        __c = __int_Area/__Area # ellipsoid approximation ratio
+        self.c = cs.Function('c', [__x, __beta], [__c], ['x', 'b'], ['c'])
+        __A = cs.SX.sym('__A', cs.Sparsity.diag(3))
+        __A[0,0] = __A[1,1] = 1.; __A[2,2] = 1./(__c**2)
+        self.A = cs.Function('A', [__beta], [__A], ['b'], ['A'])
+        __ctheta1 = cs.cos(__theta1)
+        __stheta1 = cs.sin(__theta1)
+        __R = cs.SX(3, 3)  # anti-clockwise rotation matrix (from {Slider1} to {World})
+        __R[0,0] = __ctheta1; __R[0,1] = -__stheta1; __R[1,0] = __stheta1; __R[1,1] = __ctheta1; __R[2,2] = 1.0
+        #  -------------------------------------------------------------------
+        self.R = cs.Function('R', [__x], [__R], ['x'], ['R'])  # (rotation matrix from {Slider1} to {World})
+        #  -------------------------------------------------------------------
+        __p = cs.SX.sym('p', 2) # pusher position
+        __rc_prov = cs.mtimes(__R[0:2,0:2].T, __p - __x[0:2])  # (Real {Pusher Center} in {Slider1})
+        #  -------------------------------------------------------------------
+        # slider frame ({x} forward, {y} left)
+        # pusher position
+        __xc = -__xl/2; __yc = -(__xl/2)*cs.tan(__psi_c)  # ({Contact Point} in {Slider1})
+        __rc = cs.SX(2,1); __rc[0] = __xc-__r_pusher; __rc[1] = __yc  # ({Pusher Center} in {Slider1})
+        __ctact = cs.SX(2,1); __ctact[0] = __xc; __ctact[1] = __yc  # ({Contact Point} in {Slider1})
+        # Left contact point position
+        __xL = __xl/2; __yL=(__xl/2)*((__yl/__xl)+2*cs.tan(cs.fmin(__psi_r, 0)))  # ({Left Contact Point} in {Slider1})
+        __Ltact = cs.SX(2,1); __Ltact[0] = __xL; __Ltact[1] = __yL  # ({Left Contact Point} in {Slider1})
+        # Right contact point position
+        __xR = __xl/2; __yR=(__xl/2)*(-(__yl/__xl)+2*cs.tan(cs.fmax(__psi_r, 0)))  # ({Right Contact Point} in {Slider1})
+        __Rtact = cs.SX(2,1); __Rtact[0] = __xR; __Rtact[1] = __yR  # ({Right Contact Point} in {Slider1})
+        #  -------------------------------------------------------------------
+        __psi_prov = -cs.atan2(__rc_prov[1], __xl/2)  # (Real {φ_c})
+            
+        # pusher position
+        __p_pusher = cs.mtimes(__R[0:2,0:2], __rc)[0:2] + __x[0:2]  # ({Pusher Center} in {World})
+        __p_ctact = cs.mtimes(__R[0:2,0:2], __ctact)[0:2] + __x[0:2]  # ({Contact Point} in {World})
+        #  -------------------------------------------------------------------
+        self.psi_c_ = cs.Function('psi_c_', [__x,__p,__beta], [__psi_prov])  # compute (φ_c) from state variables, pusher coordinates and slider geometry
+        self.psi_c = cs.Function('psi_c', [self.x,__p,self.beta], [self.psi_c_(self.x, __p, self.beta)])
+        #  -------------------------------------------------------------------
+        self.p_ = cs.Function('p_', [__x,__beta], [__p_pusher], ['x', 'b'], ['p'])  # compute (pusher_center_coordinate) from state variables and slider geometry
+        self.p = cs.Function('p', [self.x, self.beta], [self.p_(self.x, self.beta)], ['x', 'b'], ['p'])
+        #  -------------------------------------------------------------------
+        # pusher position
+        self.ctact_ = cs.Function('ctact_', [__x,__beta], [__ctact], ['x', 'b'], ['ctact'])
+        self.ctact = cs.Function('ctact', [__x,__beta], [self.ctact_(self.x, self.beta)], ['x', 'b'], ['ctact'])
+        # Left contact point position
+        self.Ltact_ = cs.Function('Ltact_', [__x,__beta], [__Ltact], ['x', 'b'], ['Ltact'])
+        self.Ltact = cs.Function('Ltact', [__x,__beta], [self.Ltact_(self.x, self.beta)], ['x', 'b'], ['Ltact'])
+        # Right contact point position
+        self.Rtact_ = cs.Function('Rtact_', [__x,__beta], [__Rtact], ['x', 'b'], ['Rtact'])
+        self.Rtact = cs.Function('Rtact', [__x,__beta], [self.Rtact_(self.x, self.beta)], ['x', 'b'], ['Rtact'])
+        #  -------------------------------------------------------------------
+        self.p_ctact_ = cs.Function('p_ctact_', [__x,__beta], [__p_ctact], ['x', 'b'], ['p_ctact'])  # compute (pusher_center_coordinate) from state variables and slider geometry
+        self.p_ctact = cs.Function('p_ctact', [self.x, self.beta], [self.p_ctact_(self.x, self.beta)], ['x', 'b'], ['p_ctact'])
+        #  -------------------------------------------------------------------
+        self.s1 = cs.Function('s1', [self.x], [self.x[0:3]], ['x'], ['s1'])  # compute (x1, y1, θ1) from state variables
+        self.s2 = cs.Function('s2', [self.x], [self.x[4:7]], ['x'], ['s2'])  # compute (x2, y2, θ2) from state variables
+        #  -------------------------------------------------------------------
+        
+        # dynamics
+        __Jc, __JL, __JR = cs.SX(2,3), cs.SX(2,3), cs.SX(2,3)
+        __Jc[0,0] = 1; __Jc[1,1] = 1; __Jc[0,2] = -__yc; __Jc[1,2] = __xc;  # pusher contact jacobian
+        __JL[0,0] = -1; __JL[1,1] = -1; __JL[0,2] = __yL; __JL[1,2] = -__xL;  # left contact point contact jacobian
+        __JR[0,0] = -1; __JR[1,1] = -1; __JR[0,2] = __yR; __JR[1,2] = -__xR;  # right contact point contact jacobian
+
+        self.RAJc = cs.Function('RAJc', [__x,__beta], [cs.mtimes(cs.mtimes(__R, __A), __Jc.T)], ['x', 'b'], ['RAJc'])
+        self.RAJL = cs.Function('RAJL', [__x,__beta], [cs.mtimes(cs.mtimes(__R, __A), __JL.T)], ['x', 'b'], ['RAJL'])
+        self.RAJR = cs.Function('RAJR', [__x,__beta], [cs.mtimes(cs.mtimes(__R, __A), __JR.T)], ['x', 'b'], ['RAJR'])
+        # the state transition function of slider1
+        __f1 = cs.SX(cs.vertcat(cs.mtimes(cs.mtimes(__R,__A),cs.mtimes(__Jc.T,__u[0:2])+cs.mtimes(__JL.T,__u[3:5])+cs.mtimes(__JR.T,__u[5:7])),__u[2]))
+        #  -------------------------------------------------------------------
+        self.f1_ = cs.Function('f1_', [__x,__u,__beta], [__f1], ['x', 'u', 'b'], ['f1'])  # compute (f1(x, u)) from state variables, input variables and slider geometry
+        #  -------------------------------------------------------------------
+
+        # numerize the contact positions to add linear constraints
+        x_pseudo = [0., 0., 0., 0., 0., 0., 0., self.psi_r_lim]  # pseudo state variable with only the last dimension valid
+        Ltact = self.Ltact_(x_pseudo, self.beta_eval).toarray().squeeze()
+        Rtact = self.Rtact_(x_pseudo, self.beta_eval).toarray().squeeze()
+        xL, yL = Ltact[0], Ltact[1]
+        xR, yR = Rtact[0], Rtact[1]
+        xl = self.beta_eval[0]
+        xc = -xl/2; yc = -(xl/2)*cs.tan(self.x[3])
+
+        # control constraints
+        #  -------------------------------------------------------------------
+        try:
+            assert self.mode == 'sliding_cc_slack'
+            # complementary constraint + slack variables
+            # u - control vector
+            # u[0] - normal force in the local frame
+            # u[1] - tangential force in the local frame
+            # u[2] - rel sliding vel between pusher and slider counterclockwise
+            # u[3] - rel sliding vel between pusher and slider clockwise
+            # u[4] - normal force of the left contact point in the local frame
+            # u[5] - tangential force of the left contact point in the local frame
+            # u[6] - normal force of the right contact point in the local frame
+            # u[7] - tangential of the right contact point force in the local frame
+            self.Nu = 8  # number of action variables
+            self.u = cs.SX.sym('u', self.Nu)
+            self.Nz = 2
+            self.z = cs.SX.sym('z', self.Nz)
+            self.z0 = [1.]*self.Nz
+            self.lbz = [-cs.inf]*self.Nz
+            self.ubz = [cs.inf]*self.Nz
+            # discrete extra variable
+            self.z_discrete = False
+            self.g_u = cs.Function('g_u', [self.x, self.u, self.z, self.beta], [cs.vertcat(
+                # pusher friction cone edges
+                self.miu*self.u[0]+self.u[1],
+                self.miu*self.u[0]-self.u[1],
+                # complementarity constraint
+                (self.miu * self.u[0] - self.u[1])*self.u[3] + self.z[0],
+                (self.miu * self.u[0] + self.u[1])*self.u[2] + self.z[1],
+                # left contact point friction cone edge
+                self.miu*self.u[4]+self.u[5],
+                self.miu*self.u[4]-self.u[5],
+                # right contact point friction cone edge
+                self.miu*self.u[6]+self.u[7],
+                self.miu*self.u[6]-self.u[7],
+                # force balance
+                self.u[0]-2*(self.u[4]+self.u[6]),
+                self.u[1]-2*(self.u[5]+self.u[7]),
+                # torque balance
+                (xc*self.u[1]-yc*self.u[0]-xL*self.u[5]+yL*self.u[4]-xR*self.u[7]+yR*self.u[6])-\
+                    (-xR*self.u[5]+yR*self.u[4]-xL*self.u[7]+yL*self.u[6])
+            )], ['x', 'u', 'other', 'b'], ['g'])
+            self.g_lb = [0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.]
+            self.g_ub = [cs.inf, cs.inf, 0., 0., cs.inf, cs.inf, cs.inf, cs.inf, 0., 0., 0.]
+            self.Ng_u = 11
+            # cost gain for extra variable
+            __Ks_max = self.Kz_max
+            __Ks_min = self.Kz_min
+            __i_th = cs.SX.sym('__i_th')
+            self.kz_f = cs.Function('ks', [__i_th], [__Ks_max * cs.exp(__i_th * cs.log(__Ks_min / __Ks_max))])
+            # state and acton limits
+            #  -------------------------------------------------------------------
+            self.lbx = [-cs.inf, -cs.inf, -cs.inf, -self.psi_lim, -cs.inf, -cs.inf, -cs.inf, self.psi_r_lim]
+            self.ubx = [cs.inf, cs.inf, cs.inf, self.psi_lim, cs.inf, cs.inf, cs.inf, self.psi_r_lim]
+            self.lbu = [0.0, -self.f_lim, 0.0, 0.0, 0.0, -self.f_lim, 0.0, -self.f_lim]
+            self.ubu = [self.f_lim, self.f_lim, self.psi_dot_lim, self.psi_dot_lim, self.f_lim, self.f_lim, self.f_lim, self.f_lim]
+            #  -------------------------------------------------------------------
+            # dynamics equation
+            self.f1 = cs.Function('f1', [self.x, self.u, self.beta], [self.f1_(self.x, cs.vertcat(self.u[0:2], self.u[2]-self.u[3], self.u[4:8]), self.beta)],  ['x', 'u', 'b'], ['f1'])
+        except:
+            print('Multiple sliders case should be launched with  ``{}`` mode!'.format('sliding_cc_slack'))
+            sys.exit(-1)
+        #  -------------------------------------------------------------------
+
+    def set_patches(self, ax, x_data, beta, vis_flatness=False, u_data=None):
+        """
+        :param vis_flatness: visualize auxiliary lines for differential flatness or not
+        """
+        Xl = beta[0]
+        Yl = beta[1]
+        R_pusher = beta[2]
+        x0 = x_data[:, 0]
+        # R0 = np.array(self.R(x0))
+        R0 = np.eye(3)
+        d0 = R0.dot(np.array([-Xl/2., -Yl/2., 0]))
+        self.slider = patches.Rectangle(
+                x0[0:2]+d0[0:2], Xl, Yl, angle=0.0)
+        self.pusher = patches.Circle(
+                np.array(self.p(x0, beta)), radius=R_pusher, color='black')
+        self.path_past, = ax.plot(x0[0], x0[1], color='orange')
+        self.path_future, = ax.plot(x0[0], x0[1],
+                color='orange', linestyle='dashed')
+        self.cor = patches.Circle(
+                np.array([0, 0]), radius=0.002, color='deepskyblue')
+        ax.add_patch(self.slider)
+        ax.add_patch(self.pusher)
+        ax.add_patch(self.cor)
+        self.path_past.set_linewidth(2)
+
+        # Set auxiliary lines
+        if vis_flatness:
+            # set the lines
+            self.mid_axis, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.flat_line, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.othog_line, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.force_line, = ax.plot(0., 0., color='violet', linestyle='dashed')
+            self.mid_axis.set_linewidth(2.0)
+            self.flat_line.set_linewidth(2.0)
+            self.othog_line.set_linewidth(2.0)
+            self.force_line.set_linewidth(2.0)
+
+            # self.COG = ax.scatter(0, 0, marker='o')
+
+    def animate(self, i, ax, x_data, beta, vis_flatness=False, u_data=None, X_future=None):
+        Xl = beta[0]
+        Yl = beta[1]
+        xi = x_data[:, i]
+        # distance between centre of square reference corner
+        Ri = np.array(self.R(xi))
+        di = Ri.dot(np.array([-Xl/2, -Yl/2, 0]))
+        # square reference corner
+        ci = xi[0:3] + di
+        # compute transformation with respect to rotation angle xi[2]
+        trans_ax = ax.transData
+        coords = trans_ax.transform(ci[0:2])
+        trans_i = transforms.Affine2D().rotate_around(
+                coords[0], coords[1], xi[2])
+        # Set changes
+        self.slider.set_transform(trans_ax+trans_i)
+        self.slider.set_xy([ci[0], ci[1]])
+        self.pusher.set_center(np.array(self.p(xi, beta)))
+        # Set path changes
+        if self.path_past is not None:
+            self.path_past.set_data(x_data[0, 0:i], x_data[1, 0:i])
+        if (self.path_future is not None) and (X_future is not None):
+            self.path_future.set_data(X_future[0, :, i], X_future[1, :, i])
+
+        # Set auxiliary lines
+        if vis_flatness:
+            # Set auxiliary lines
+            ab_ratio = (self.A(beta)[0, 0] / self.A(beta)[2, 2]).toarray().squeeze()
+            ui = u_data[:, i]
+            fn = ui[0]; ft = ui[1]
+            ctact_pt = self.ctact_(xi, beta).toarray().squeeze()
+            xc = ctact_pt[0]; yc = ctact_pt[1]  # contact point
+            r = np.sqrt(xc ** 2 + yc ** 2)
+            xt = -ab_ratio * xc / (r ** 2); yt = -ab_ratio * yc / (r ** 2)  # the intersection of central axis and differential flatness line
+            # general form of line: Ax + By = C
+            # parameter [A, B] of general formalized auxiliary line
+            param_AB = np.array([[xc, yc],
+                                 [yc, -xc],
+                                 [fn, ft],
+                                 [ft, -fn]])
+            # parameter [C] of general formalized auxiliary line
+            param_C = np.array([[xt * xc + yt * yc],
+                                [0],
+                                [0],
+                                [xc * ft - yc * fn]])
+            # key points
+            Ri_xy = Ri[:2, :2]
+            cor_pt = Ri_xy @ np.linalg.inv(param_AB[[0, 2], :]) @ param_C[[0, 2], :].squeeze() + xi[:2] # center of rotation (COR)
+            force_pt = Ri_xy @ np.linalg.inv(param_AB[[2, 3], :]) @ param_C[[2, 3], :].squeeze() + xi[:2]  # point on the line of force
+            ctact_pt = Ri_xy @ np.array([xc, yc]) + xi[:2]  # contact point
+            tilde_pt = Ri_xy @ np.array([xt, yt]) + xi[:2]  # the intersection of central axis and differential flatness line
+            # set the lines
+            self.mid_axis.set_data([ctact_pt[0], tilde_pt[0]], [ctact_pt[1], tilde_pt[1]])
+            self.flat_line.set_data([tilde_pt[0], cor_pt[0]], [tilde_pt[1], cor_pt[1]])
+            self.othog_line.set_data([force_pt[0], cor_pt[0]], [force_pt[1], cor_pt[1]])
+            self.force_line.set_data([force_pt[0], ctact_pt[0]], [force_pt[1], ctact_pt[1]])
+            self.cor.set_center(np.array([cor_pt[0], cor_pt[1]]))
+            print(cor_pt)
+            # # set the slider's center
+            # self.COG.set_xy(xi[0], xi[1])
+        return []
+    #  -------------------------------------------------------------------
 
 # -------------------------------------------------------------------

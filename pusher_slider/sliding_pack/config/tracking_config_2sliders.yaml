@@ -12,7 +12,7 @@ dynamics:
     pusherForceLim:  0.45
     pusherAngleVelLim: 3.0
     pusherVelLim: 0.2 #  [m/s]
-    Ks_max: 50.
+    Ks_max: 5000.
     Ks_min: 0.1
     Kx_max: 10.
     xFacePsiLimit: 0.9
@@ -25,7 +25,7 @@ TO:
     contactFace: '-x'  # '+x', '-x', '+y', '-y'
     solverName: 'ipopt'  # 'ipopt', 'snopt', 'gurobi', 'qpoases', 'knitro'
     # solverName: 'knitro'  # 'ipopt', 'snopt', 'gurobi', 'qpoases', 'knitro'
-    W_x: [0.0, 1.0, 1.0]  # diagonal state weights
+    W_x: [0.0, 1.0, 1.0, 1.0, 1.0, 0.01]  # diagonal state weights
     W_u: [0.01, 0.01]  # diagonal control weights
     K_goal: 100.
     X_goal: null

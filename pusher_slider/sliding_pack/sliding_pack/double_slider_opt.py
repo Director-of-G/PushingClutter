@@ -19,17 +19,20 @@ import sliding_pack
 class buildDoubleSliderOptObj():
 
     def __init__(self, dyn_class, timeHorizon, configDict, X_nom_val=None,
-                 dt=0.1, maxIter=None):
+                 controlRelPose=True, dt=0.1, maxIter=None):
         
         # init parameters
         self.dyn = dyn_class
         self.TH = timeHorizon
         self.solver_name = configDict['solverName']
         self.code_gen = configDict['codeGenFlag']
+        self.controlRelPose = controlRelPose
         self.max_iter = maxIter
 
         # define weight matrix, which will be used in the cost function
         self.W_x = cs.diag(cs.SX(configDict['W_x']))[:self.dyn.Nx, :self.dyn.Nx]
+        if self.controlRelPose is not True:
+            self.W_x[:3, :3] = 0.
         self.W_u = cs.diag(cs.SX(configDict['W_u']))[:self.dyn.Nu, :self.dyn.Nu]
         self.K_goal = configDict['K_goal']
         if X_nom_val is None:
@@ -111,11 +114,11 @@ class buildDoubleSliderOptObj():
                 [__x_bar, self.dyn.u_opt],
                 [cs.dot(__x_bar, cs.mtimes(self.W_x, __x_bar)) + 
                  cs.dot(self.dyn.u_opt, cs.mtimes(self.W_u, self.dyn.u_opt))])
-        self.term_cost_f = cs.Function(
-                'cost_f',
-                [__x_bar, self.dyn.u_opt],
-                [cs.dot(__x_bar, cs.mtimes(cs.mtimes(self.W_x, np.diag([1.0, 1.0, 0.0])), __x_bar)) + 
-                 cs.dot(self.dyn.u_opt, cs.mtimes(self.W_u, self.dyn.u_opt))])
+        # self.term_cost_f = cs.Function(
+        #         'cost_f',
+        #         [__x_bar, self.dyn.u_opt],
+        #         [cs.dot(__x_bar, cs.mtimes(cs.mtimes(self.W_x, np.diag([1.0, 1.0, 0.0])), __x_bar)) + 
+        #          cs.dot(self.dyn.u_opt, cs.mtimes(self.W_u, self.dyn.u_opt))])
         self.cost_F = self.cost_f.map(self.TH-1)
         # ------------------------------------------
         self.kx_F = self.dyn.kx_f.map(self.TH-1)
@@ -221,7 +224,7 @@ class buildDoubleSliderOptObj():
             opts_dict['ipopt.jac_d_constant'] = 'yes'
             opts_dict['ipopt.warm_start_init_point'] = 'yes'
             opts_dict['ipopt.hessian_constant'] = 'yes'
-            opts_dict['ipopt.max_iter'] = 200
+            opts_dict['ipopt.max_iter'] = self.max_iter
         if self.solver_name == 'knitro':
             opts_dict['knitro'] = {}
             # opts_dict['knitro.maxit'] = 80

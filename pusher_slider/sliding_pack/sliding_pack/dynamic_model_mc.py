@@ -28,7 +28,7 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
     # The slider A has a face contact. and the slider B has a vertex contact.
     # The dynamic model is under quasi-static assumption.
     # The dynamic model is approximated by an ellipsoid.
-    def __init__(self, configDict, contactNum=2.):
+    def __init__(self, configDict, contactNum=2., contactMode='A_face_B_edge', controlRelPose=True):
 
         # init parameters
         #  -------------------------------------------------------------------
@@ -41,6 +41,8 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         self.Ks_max = configDict['Ks_max']
         self.Ks_min = configDict['Ks_min']
         self.n_ctact = contactNum  # number of contacts (including the pusher)
+        self.contactMode = contactMode  # 'A_face_B_edge' or 'A_edge_B_face
+        self.controlRelPose = controlRelPose  # if true, only relative pose will be considered; if false, we control sliderA pose instead.
         #  -------------------------------------------------------------------
         self.Nbeta = 3
         self.beta = cs.SX.sym('beta', self.Nbeta)
@@ -257,15 +259,28 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         
         # define symbols for building optimization problems
         #  -------------------------------------------------------------------
-        self.Nx = 3
-        self.x_opt = cs.SX.sym('x', self.Nx)
-        self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -cs.inf]
-        self.ubx = [0.5*self.y_length, 0.5*self.y_length, cs.inf]
-        
-        __dx = cs.SX(3,1)
-        __dx[0] = cs.mtimes(np.expand_dims(__DA0[:,0], axis=0), __vp - cs.mtimes(__JA0, __VA))
-        __dx[1] = cs.mtimes(np.expand_dims(__DA1[:,1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
-        __dx[2] = (__VB - __VA)[2]
+        if self.controlRelPose:
+            self.Nx = 3
+            self.x_opt = cs.SX.sym('x', self.Nx)
+            self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -cs.inf]
+            self.ubx = [0.5*self.y_length, 0.5*self.y_length, cs.inf]
+            
+            __dx = cs.SX(3,1)
+            __dx[0] = cs.mtimes(np.expand_dims(__DA0[:,0], axis=0), __vp - cs.mtimes(__JA0, __VA))
+            __dx[1] = cs.mtimes(np.expand_dims(__DA1[:,1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
+            __dx[2] = (__VB - __VA)[2]
+            
+        else:
+            self.Nx = 6
+            self.x_opt = cs.SX.sym('x', self.Nx)
+            self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -cs.inf, -cs.inf, -cs.inf, -cs.inf]
+            self.ubx = [0.5*self.y_length, 0.5*self.y_length, 0., cs.inf, cs.inf, cs.inf]
+             
+            __dx = cs.SX(6,1)
+            __dx[0] = cs.mtimes(np.expand_dims(__DA0[:,0], axis=0), __vp - cs.mtimes(__JA0, __VA))
+            __dx[1] = cs.mtimes(np.expand_dims(__DA1[:,1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
+            __dx[2] = (__VB - __VA)[2]
+            __dx[3:] = cs.mtimes(__RA, __VA)
         
         self.Nu = 2
         self.u_opt = cs.SX.sym('u', self.Nu)
@@ -286,8 +301,8 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         self.Ns = 8
         self.s_opt = cs.SX.sym('s', self.Ns)
         self.s0 = [1.]*self.Ns
-        self.lbs = [-1e-7]*self.Ns
-        self.ubs = [1e-7]*self.Ns
+        self.lbs = [-cs.inf]*self.Ns
+        self.ubs = [cs.inf]*self.Ns
 
         self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1])], ['b', 'x'], ['M_opt'])
         self.q_opt = cs.Function('q_opt', [self.u_opt], [self.q_opt_(self.u_opt)], ['u'], ['q_opt'])
