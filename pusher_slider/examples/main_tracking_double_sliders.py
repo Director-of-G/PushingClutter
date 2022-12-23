@@ -288,9 +288,9 @@ theta = cs.DM([0.5*np.pi, 0.5*np.pi+x0[2]])
 import pdb; pdb.set_trace()
 x_a0 = np.array([0.0, 0.0, 0.5*np.pi])
 x_b0 = np.zeros_like(x_a0)
-x_b0[:2] = x_a0[:2] + sliding_pack.db_sim.rotation_matrix2X2(0.5*np.pi) @ np.array(ctact[:, 1]).squeeze().astype(np.float32) - \
-           sliding_pack.db_sim.rotation_matrix2X2(float(x_init[2])) @ np.array([-0.5*float(beta[0]), -0.5*float(beta[1])])
-x_b0[2] = x_a0[2] + float(x_init[2])
+x_b0[:2] = x_a0[:2] + sliding_pack.db_sim.rotation_matrix2X2(float(theta[0])) @ np.array(ctact[:, 1]).squeeze().astype(np.float32) - \
+           sliding_pack.db_sim.rotation_matrix2X2(float(theta[1])) @ np.array(ctact[:, 2]).squeeze().astype(np.float32)
+x_b0[2] = float(theta[1])
 
 db_simObj = sliding_pack.db_sim.buildDoubleSliderSimObj(
     dbtrack_dyn, N-1, dbplan_slider_config['dynamics'], dt, method='matlab',
