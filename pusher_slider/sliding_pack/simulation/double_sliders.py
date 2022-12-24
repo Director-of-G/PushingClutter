@@ -16,7 +16,7 @@ from copy import deepcopy
 from cvxopt import matrix, solvers
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from shapely.geometry import Polygon
+from shapely.geometry import Polygon, Point
 from shapely import ops, affinity
 #  -------------------------------------------------------------------
 import matlab.engine as engine
@@ -54,6 +54,64 @@ def get_contact_point(beta, poseA, poseB):
 
     return [pA.x, pA.y]
 
+def get_contact_mode(beta, poseA, poseB):
+    """
+    Decide the contact mode: A_face_B_edge or A_edge_B_face.
+    By computing the nearest points between sliderA and sliderB, using Polygon.
+    :param beta: slider geometry
+    :param poseA: sliderA pose
+    :param poseB: sliderB pose
+    :return mode: (string) contactMode
+    :return yA1: (float) coordinate
+    :return yB0: (float) coordinate
+    """
+    # create polygon and compute nearest point pairs
+    x, y = float(beta[0]/2), float(beta[1]/2)
+    base_poly = Polygon([(x, y), (-x, y), (-x, -y), (x, -y), (x, y)])
+    polyA = affinity.rotate(base_poly, poseA[2], origin='center', use_radians=True)
+    polyB = affinity.rotate(base_poly, poseB[2], origin='center', use_radians=True)
+    polyA = affinity.translate(polyA, poseA[0], poseA[1])
+    polyB = affinity.translate(polyB, poseB[0], poseB[1])
+    pA, pB = ops.nearest_points(polyA, polyB)
+    
+    # decide whose edge contacts whose face
+    pA = np.array([pA.x, pA.y])
+    pB = np.array([pB.x, pB.y])
+    
+    vertexA = np.c_[polyA.exterior.coords.xy[0][:-1], polyA.exterior.coords.xy[1][:-1]]
+    vertexB = np.c_[polyB.exterior.coords.xy[0][:-1], polyB.exterior.coords.xy[1][:-1]]
+    # rotation matrix
+    RA, RB = rotation_matrix2X2(poseA[2]), rotation_matrix2X2(poseB[2])
+    
+    # if penetration is detected, change the contact mode
+    for i in range(vertexA.shape[0]):
+        coord = vertexA[i, :]
+        if polyB.contains(Point(coord)):
+            _, _pB = ops.nearest_points(Point(coord), polyB)
+            _pB = np.array([_pB.x, _pB.y])
+            yA1 = (np.linalg.inv(RA) @ (coord - poseA[:2]))[1]
+            yB0 = (np.linalg.inv(RB) @ (_pB - poseB[:2]))[1]
+            return "A_edge_B_face", yA1, yB0
+    for i in range(vertexB.shape[0]):
+        coord = vertexB[i, :]
+        if polyA.contains(Point(coord)):
+            _, _pA = ops.nearest_points(Point(coord), polyA)
+            _pA = np.array([_pA.x, _pA.y])
+            yA1 = (np.linalg.inv(RA) @ (_pA - poseA[:2]))[1]
+            yB0 = (np.linalg.inv(RB) @ (coord - poseB[:2]))[1]
+            return "A_face_B_edge", yA1, yB0
+        
+    # no contact is two polygons are far away
+    if np.linalg.norm(pA - pB, ord=2) >= 1e-5:
+        return "A_null_B_null", 0., 0.
+    
+    yA1 = (np.linalg.inv(RA) @ (pA - poseA[:2]))[1]
+    yB0 = (np.linalg.inv(RB) @ (pB - poseB[:2]))[1]
+    if np.linalg.norm(pA - vertexA, ord=2, axis=1).min() < np.linalg.norm(pB - vertexB, ord=2, axis=1).min():
+        return "A_edge_B_face", yA1, yB0
+    else:
+        return "A_face_B_edge", yA1, yB0
+    
 def rotation_matrix2X2(theta):
     """
     Rotate anti-clockwise
@@ -127,14 +185,13 @@ sol = solvers.qp(P=Q, q=p, G=G, h=h, A=A, b=b)
 #  -------------------------------------------------------------------
 class buildDoubleSliderSimObj():
     
-    def __init__(self, dyn_class, timeHorizon, configDict, dt=0.01, method='qpoases', contactMode='A_face_B_edge',
+    def __init__(self, timeHorizon, configDict, dt=0.01, method='qpoases',
                  showAnimFlag=True, saveFileFlag=False) -> None:
         # simulation constants
         self.N = timeHorizon
         self.dt = dt
         self.configDict = configDict
         self.method = method
-        self.contactMode = contactMode  # 'A_face_B_edge' or 'A_edge_B_face
         self.showAnimFlag = showAnimFlag
         self.saveFileFlag = saveFileFlag
         self.pusherVelLim = configDict['pusherVelLim']
@@ -145,10 +202,51 @@ class buildDoubleSliderSimObj():
             self.configDict['pusherRadious']
         ]
         
-        self.db_dyn = dyn_class
+        # dynamic model initialization
+        self.db_dyn = {}
+        self.db_dyn['A_face_B_edge'] = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
+            planning_config['dynamics'],
+            contactMode='A_face_B_edge',
+            contactNum=2
+        )
+        self.db_dyn['A_edge_B_face'] = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
+            planning_config['dynamics'],
+            contactMode='A_edge_B_face',
+            contactNum=2
+        )
+        self.db_dyn['A_null_B_null'] = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
+            planning_config['dynamics'],
+            contactMode='A_null_B_null',
+            contactNum=2
+        )
         
+        # initialize the matlab interface
         if self.method == 'matlab':
             self.eng = engine.start_matlab()
+            
+    def get_slider_pose_and_contact(self, x_init, y0, contactMode='A_face_B_edge'):
+        """
+        Get slider pose and contact point using x_init and user-defined contactMode.
+        """
+        theta = cs.DM([0.5*np.pi, 0.5*np.pi+x_init[2]])
+        if contactMode == 'A_face_B_edge':
+            yB0 = y0
+            ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
+                           [        x_init[0],        x_init[1],              yB0]])
+        elif contactMode == 'A_edge_B_face':
+            yA1 = y0
+            ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
+                           [        x_init[0],              yA1,         x_init[1]]])
+    
+        # initialize slider states
+        #  -------------------------------------------------------------------
+        x_a0 = np.array([0.0, 0.0, 0.5*np.pi])
+        x_b0 = np.zeros_like(x_a0)
+        x_b0[:2] = x_a0[:2] + rotation_matrix2X2(float(theta[0])) @ np.array(ctact[:, 1]).squeeze().astype(np.float32) - \
+                    rotation_matrix2X2(float(theta[1])) @ np.array(ctact[:, 2]).squeeze().astype(np.float32)
+        x_b0[2] = float(theta[1])
+        
+        return x_a0, x_b0, ctact
             
     def run_one_step(self, x_a, x_b, ctact, vp, beta, printFlag=False):
         """
@@ -168,11 +266,16 @@ class buildDoubleSliderSimObj():
         vp[0] = max(-self.pusherVelLim, min(self.pusherVelLim, vp[0]))
         vp[1] = max(-self.pusherVelLim, min(self.pusherVelLim, vp[1]))
         
+        # get the contact mode and dynamic model
+        contactMode, yA1, yB0 = get_contact_mode(beta, x_a, x_b)
+        ctact[1, 1] = yA1; ctact[1, 2] = yB0
+        dyn = self.db_dyn[contactMode]
+        
         # matrices for optimization
-        w = self.db_dyn.w
-        z = self.db_dyn.z
-        M = self.db_dyn.M(beta, theta, ctact.T)
-        q = self.db_dyn.q(vp)
+        w = dyn.w
+        z = dyn.z
+        M = dyn.M(beta, theta, ctact.T)
+        q = dyn.q(vp)
         
         # create quadratic programming to solve the LCP
         if self.method == 'qpoases':
@@ -194,11 +297,15 @@ class buildDoubleSliderSimObj():
         # report solution details
         z_ctact_ = z_ctact.toarray().squeeze()
         if printFlag:
+            print('M: ', M.toarray().squeeze())
+            print('q: ', q.toarray().squeeze())
+            print('N: ', dyn.N(beta, ctact.T).toarray().squeeze())
+            print('L: ', dyn.L(beta, ctact.T).toarray().squeeze())
             print('force: ', [z_ctact_[0], z_ctact_[2]-z_ctact_[3]], [z_ctact_[1], z_ctact_[4]-z_ctact_[5]])
-            print('wrenchA: ', self.db_dyn.wrenchA(beta,theta,ctact.T,z_ctact).toarray().squeeze())
-            print('wrenchB: ', self.db_dyn.wrenchB(beta,theta,ctact.T,z_ctact).toarray().squeeze())
-            print('twistA: ', self.db_dyn.VA(beta,theta,ctact.T,z_ctact).toarray().squeeze())
-            print('twistB: ', self.db_dyn.VB(beta,theta,ctact.T,z_ctact).toarray().squeeze())
+            print('wrenchA: ', dyn.wrenchA(beta,theta,ctact.T,z_ctact).toarray().squeeze())
+            print('wrenchB: ', dyn.wrenchB(beta,theta,ctact.T,z_ctact).toarray().squeeze())
+            print('twistA: ', dyn.VA(beta,theta,ctact.T,z_ctact).toarray().squeeze())
+            print('twistB: ', dyn.VB(beta,theta,ctact.T,z_ctact).toarray().squeeze())
             if self.method == 'qpoases':
                 print('cost: ', r['cost'])
             print('alpha: ', slack[:2])
@@ -207,50 +314,55 @@ class buildDoubleSliderSimObj():
             print('lamda: ', z_ctact[6:])
         
         # update state variables
-        x_a_new = x_a + self.dt*self.db_dyn.fA(beta, theta, ctact.T, z_ctact)
-        x_b_new = x_b + self.dt*self.db_dyn.fB(beta, theta, ctact.T, z_ctact)  # since dt -\-> 0, penetration between slider A and B might occur
+        x_a_new = x_a + self.dt*dyn.fA(beta, theta, ctact.T, z_ctact)
+        x_b_new = x_b + self.dt*dyn.fB(beta, theta, ctact.T, z_ctact)  # since dt -\-> 0, penetration between slider A and B might occur
         
         # update the rotation matrices
-        R_a = self.db_dyn.RA(x_a_new[2])
-        R_b = self.db_dyn.RB(x_b_new[2])
+        R_a = dyn.RA(x_a_new[2])
+        R_b = dyn.RB(x_b_new[2])
         
         # update the contact point between two sliders
         # ab_ctact_pt = get_contact_point(beta, x_a_new, x_b_new)  # penetration might occur
         ctact_new = deepcopy(ctact)
         # update the push point
-        ctact_new[:, 0] = ctact[:, 0] + self.dt*self.db_dyn.fvp(beta, theta, ctact.T, z_ctact, vp)
+        ctact_new[:, 0] = ctact[:, 0] + self.dt*dyn.fvp(beta, theta, ctact.T, z_ctact, vp)
         
         # update the slider's contact point and sliderB's pose
-        if self.contactMode == 'A_face_B_edge':
-            ctact_new[:, 1] = ctact[:, 1] + self.dt*self.db_dyn.vpB(beta, theta, ctact.T, z_ctact)
+        if contactMode == 'A_face_B_edge':
+            ctact_new[:, 1] = ctact[:, 1] + self.dt*dyn.vpB(beta, theta, ctact.T, z_ctact)
             x_b_new[:2] = (x_a_new[:2] + R_a[:2, :2] @ ctact_new[:, 1]) - R_b[:2, :2] @ np.array(ctact_new[:, 2]).squeeze()  # no penetration is guaranteed
-        elif self.contactMode == 'A_edge_B_face':
-            ctact_new[:, 2] = ctact[:, 2] + self.dt*self.db_dyn.vpB(beta, theta, ctact.T, z_ctact)
+        elif contactMode == 'A_edge_B_face':
+            ctact_new[:, 2] = ctact[:, 2] + self.dt*dyn.vpB(beta, theta, ctact.T, z_ctact)
             x_b_new[:2] = (x_a_new[:2] + R_a[:2, :2] @ ctact_new[:, 1]) - R_b[:2, :2] @ np.array(ctact_new[:, 2]).squeeze()  # no penetration is guaranteed
+        elif contactMode == 'A_null_B_null':
+            pass
         
-
         return x_a_new, x_b_new, ctact_new
         
-    def run(self, x_init=None, u_opt=None):
+    def run(self, x_a0, x_b0, yA0, u_opt=None, printFlag=False):
         # initialize simulation variables
         #  -------------------------------------------------------------------
         beta = cs.DM(self.beta)
-        theta = cs.DM([0.5*np.pi, 0.5*np.pi+x_init[2]])
-        if self.contactMode == 'A_face_B_edge':
-            ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
-                           [        x_init[0],        x_init[1], -0.5*self.beta[1]]])
-        elif self.contactMode == 'A_edge_B_face':
-            ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
-                           [        x_init[0],-0.5*self.beta[1],         x_init[1]]])
+        # theta = cs.DM([0.5*np.pi, 0.5*np.pi+x_init[2]])
+        # if contactMode == 'A_face_B_edge':
+        #     ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
+        #                    [        x_init[0],        x_init[1], -0.5*self.beta[1]]])
+        # elif contactMode == 'A_edge_B_face':
+        #     ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
+        #                    [        x_init[0],-0.5*self.beta[1],         x_init[1]]])
         vp = u_opt if type(u_opt) == cs.DM else cs.DM(u_opt)
         
         # initialize slider states
         #  -------------------------------------------------------------------
-        x_a0 = np.array([0.0, 0.0, 0.5*np.pi])
-        x_b0 = np.zeros_like(x_a0)
-        x_b0[:2] = x_a0[:2] + rotation_matrix2X2(float(theta[0])) @ np.array(ctact[:, 1]).squeeze().astype(np.float32) - \
-                   rotation_matrix2X2(float(theta[1])) @ np.array(ctact[:, 2]).squeeze().astype(np.float32)
-        x_b0[2] = float(theta[1])
+        # x_a0 = np.array([0.0, 0.0, 0.5*np.pi])
+        # x_b0 = np.zeros_like(x_a0)
+        # x_b0[:2] = x_a0[:2] + rotation_matrix2X2(float(theta[0])) @ np.array(ctact[:, 1]).squeeze().astype(np.float32) - \
+        #            rotation_matrix2X2(float(theta[1])) @ np.array(ctact[:, 2]).squeeze().astype(np.float32)
+        # x_b0[2] = float(theta[1])
+        
+        _, yA1, yB0 = get_contact_mode(self.beta, x_a0, x_b0)
+        ctact = cs.DM([[-0.5*self.beta[0], 0.5*self.beta[0], -0.5*self.beta[0]],
+                       [              yA0,              yA1,              yB0]])
                    
         X_A, X_B = np.expand_dims(x_a0, axis=0), np.expand_dims(x_b0, axis=0)
         X_ctact = np.expand_dims(ctact[:, 0].toarray().squeeze(), axis=0)  # the pusher contact point on slider A
@@ -262,11 +374,11 @@ class buildDoubleSliderSimObj():
             x_a, x_b = X_A[-1, :], X_B[-1, :]
             
             print('---------- iters:{0} ----------'.format(n_iter))
-            x_a_new, x_b_new, ctact = self.run_one_step(x_a, x_b, ctact, vp[:, n_iter], beta, printFlag=False)
+            x_a_new, x_b_new, ctact = self.run_one_step(x_a, x_b, ctact, vp[:, n_iter], beta, printFlag=printFlag)
             
             # update the azimuth angle
-            theta[0] = x_a_new[-1]
-            theta[1] = x_b_new[-1]
+            # theta[0] = x_a_new[-1]
+            # theta[1] = x_b_new[-1]
             
             # append new states
             X_A = np.concatenate((X_A, x_a_new.T), axis=0)
@@ -310,11 +422,11 @@ class buildDoubleSliderSimObj():
             fig.set_size_inches(8, 6, forward=True)
             
             # set patches
-            self.db_dyn.set_patches(ax, X_A, X_B, X_ctact, beta)
+            self.db_dyn['A_face_B_edge'].set_patches(ax, X_A, X_B, X_ctact, beta)
             # show animation
             ani = animation.FuncAnimation(
                     fig,
-                    self.db_dyn.animate,
+                    self.db_dyn['A_face_B_edge'].animate,
                     fargs=(ax, X_A, X_B, X_ctact, beta),
                     frames=X_ctact.shape[1]-1,
                     interval=self.dt*1000*5,  # microseconds
@@ -330,9 +442,9 @@ class buildDoubleSliderSimObj():
             
 if __name__ == '__main__':
     # simulation constant
-    N = 30*8
+    N = 60*8
     dt = 0.005
-    x_init = [-0.04, 0.04, (75./180.)*np.pi-0.5*np.pi]
+    x_init = [-0.02, -0.04, (115./180.)*np.pi-0.5*np.pi]
     u_opt = np.array([0.05, 0.]).reshape(-1, 1).repeat(N, axis=1)
 
     # load config dict
@@ -345,18 +457,12 @@ if __name__ == '__main__':
         planning_config['dynamics']['pusherRadious']
     ]
     
-    # build dynamics
-    dyn = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
-        planning_config['dynamics'],
-        contactMode='A_edge_B_face',
-        contactNum=2
-    )
-    
     # build simulation object
     simObj = buildDoubleSliderSimObj(
-        dyn, N, planning_config['dynamics'], dt, method='matlab', contactMode='A_edge_B_face',
+        N, planning_config['dynamics'], dt, method='matlab',
         showAnimFlag=True, saveFileFlag=True)
     
     # run simulation
-    X_A, X_B, X_ctact = simObj.run(x_init, u_opt)
+    x_a0, x_b0, _ = simObj.get_slider_pose_and_contact(x_init, y0=0.5*beta[1], contactMode='A_face_B_edge')
+    X_A, X_B, X_ctact = simObj.run(x_a0, x_b0, x_init[0], u_opt, printFlag=True)
     simObj.visualization(X_A, X_B, X_ctact, beta)

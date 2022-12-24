@@ -109,6 +109,9 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         __cdtheta = cs.cos(__dtheta); __sdtheta = cs.sin(__dtheta)
         __TB2A[0,0] = __cdtheta; __TB2A[0,1] = -__sdtheta; __TB2A[1,0] = __sdtheta; __TB2A[1,1] = __cdtheta
         __TA2B[0,0] = __cdtheta; __TA2B[0,1] = __sdtheta; __TA2B[1,0] = -__sdtheta; __TA2B[1,1] = __cdtheta
+        # T - inverse matrix for rotation of pi
+        __Tpi = cs.SX(2, 2)
+        __Tpi[0,0] = -1; __Tpi[0,1] = 0.; __Tpi[1,0] = 0.; __Tpi[1,1] = -1
         # -------------------------------------------------------------------
 
         # contact jacobian
@@ -117,14 +120,9 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         # __xA0 = cs.SX.sym('__xA0'); __yA0 = cs.SX.sym('__yA0')
         # __xA1 = cs.SX.sym('__xA1'); __yA1 = cs.SX.sym('__yA1')
         # __xB0 = cs.SX.sym('__xB0'); __yB0 = cs.SX.sym('__yB0')
-        if self.contactMode == 'A_face_B_edge':
-            __xA0 = -__Beta[0]/2; __yA0 = cs.SX.sym('__yA0')
-            __xA1 = __Beta[0]/2; __yA1 = cs.SX.sym('__yA1')
-            __xB0 = -__Beta[0]/2; __yB0 = -__Beta[1]/2
-        elif self.contactMode == 'A_edge_B_face':
-            __xA0 = -__Beta[0]/2; __yA0 = cs.SX.sym('__yA0')
-            __xA1 = __Beta[0]/2; __yA1 = -__Beta[1]/2
-            __xB0 = -__Beta[0]/2; __yB0 = cs.SX.sym('__yB0')
+        __xA0 = -__Beta[0]/2; __yA0 = cs.SX.sym('__yA0')
+        __xA1 = __Beta[0]/2; __yA1 = cs.SX.sym('__yA1')
+        __xB0 = -__Beta[0]/2; __yB0 = cs.SX.sym('__yB0')
         __ctact = cs.SX(3, 2)
         __ctact[0, 0] = __xA0; __ctact[0, 1] = __yA0
         __ctact[1, 0] = __xA1; __ctact[1, 1] = __yA1
@@ -139,15 +137,21 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         # stacking matrix
         #  -------------------------------------------------------------------
         # auxiliary matrix
-        __K = cs.mtimes(cs.mtimes(cs.mtimes(__TB2A, __JB0), __A), cs.mtimes(__JB0.T, __TA2B))
+        if self.contactMode == 'A_face_B_edge': __K = cs.mtimes(cs.mtimes(cs.mtimes(__TB2A, __JB0), __A), cs.mtimes(__JB0.T, __TA2B))
+        elif self.contactMode == 'A_edge_B_face': 
+            __K = cs.mtimes(cs.mtimes(cs.mtimes(__TA2B, __JA1), __A), cs.mtimes(__JA1.T, cs.mtimes(__Tpi, __TB2A)))
+            __K_pusher = cs.mtimes(cs.mtimes(cs.mtimes(__TA2B, __JA1), __A), __JA0.T)
+        elif self.contactMode == 'A_null_B_null':
+            __K = cs.SX.zeros(2, 2)
         # self.K = cs.Function('K', [__Beta, __ctact, __theta], [__K], ['b', 'c', 't'], ['K'])
         #  -------------------------------------------------------------------
         # normal vectors
         __nA0 = np.array([[1., 0.]])
         __nA1 = np.array([[-1., 0.]])
         __nB0 = np.array([[1., 0.]])
-        __N = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nA1, __JA1))
-        __Nv = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nA1, __JA1))
+        if self.contactMode == 'A_face_B_edge': __N = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nA1, __JA1))
+        elif self.contactMode == 'A_edge_B_face': __N = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nB0, __JB0))
+        elif self.contactMode == 'A_null_B_null': __N = cs.vertcat(cs.mtimes(__nA0, __JA0), np.zeros((1, 3)))
         # tangent vectors
         __DA0 = np.array([[0., 1.],
                           [0., -1.]]).T
@@ -155,8 +159,25 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
                           [0., 1.]]).T
         __DB0 = np.array([[0., 1.],
                           [0., -1.]]).T
-        __L = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DA1.T, __JA1))
-        __Lv = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DA1.T, __JA1))
+        if self.contactMode == 'A_face_B_edge': __L = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DA1.T, __JA1))
+        elif self.contactMode == 'A_edge_B_face': __L = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DB0.T, __JB0))
+        elif self.contactMode == 'A_null_B_null': __L = cs.vertcat(cs.mtimes(__DA0.T, __JA0), np.zeros((2, 3)))
+        #  -------------------------------------------------------------------
+        # projection matrix - project normal/tangential force to wrench
+        # projection matrix (N)
+        if self.contactMode == 'A_face_B_edge': __NA = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nA1, __JA1))
+        elif self.contactMode == 'A_edge_B_face': __NA = cs.vertcat(cs.mtimes(__nA0, __JA0), cs.mtimes(__nB0, cs.mtimes(cs.mtimes(__Tpi, __TB2A).T, __JA1)))
+        elif self.contactMode == 'A_null_B_null': __NA = cs.vertcat(cs.mtimes(__nA0, __JA0), np.zeros((1, 3)))
+        if self.contactMode == 'A_face_B_edge': __NB = cs.vertcat(np.zeros((1, 3)), cs.mtimes(__nA1, cs.mtimes(cs.mtimes(__Tpi, __TA2B).T, __JB0)))
+        elif self.contactMode == 'A_edge_B_face': __NB = cs.vertcat(np.zeros((1, 3)), cs.mtimes(__nB0, __JB0))
+        elif self.contactMode == 'A_null_B_null': __NB = cs.vertcat(np.zeros((1, 3)), np.zeros((1, 3)))
+        # projection matrix (L)
+        if self.contactMode == 'A_face_B_edge': __LA = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DA1.T, __JA1))
+        elif self.contactMode == 'A_edge_B_face': __LA = cs.vertcat(cs.mtimes(__DA0.T, __JA0), cs.mtimes(__DB0.T, cs.mtimes(cs.mtimes(__Tpi, __TB2A).T, __JA1)))
+        elif self.contactMode == 'A_null_B_null': __LA = cs.vertcat(cs.mtimes(__DA0.T, __JA0), np.zeros((2, 3)))
+        if self.contactMode == 'A_face_B_edge': __LB = cs.vertcat(np.zeros((2, 3)), cs.mtimes(__DA1.T, cs.mtimes(cs.mtimes(__Tpi, __TA2B).T, __JB0)))
+        elif self.contactMode == 'A_edge_B_face': __LB = cs.vertcat(np.zeros((2, 3)), cs.mtimes(__DB0.T, __JB0))
+        elif self.contactMode == 'A_null_B_null': __LB = cs.vertcat(np.zeros((2, 3)), np.zeros((2, 3)))
         #  -------------------------------------------------------------------
         # sa, sb represented with fn, ft, the coefficient matrices are
         #  -------------------------------------------------------------------
@@ -165,10 +186,25 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
                            [0, 0]])
         __tsel = np.array([[0, 0, 0, 0],
                            [0, 0, 1, -1]])
-        __N1 = cs.SX(2, 2); __N1[0, :] = 0; __N1[1, :] = -cs.mtimes(__nA1, cs.mtimes(__K, __nsel))
-        __L1 = cs.SX(2, 4); __L1[0, :] = 0; __L1[1, :] = -cs.mtimes(__nA1, cs.mtimes(__K, __tsel))
-        __N2 = cs.SX(4, 2); __N2[:2, :] = 0; __N2[2:, :] = -cs.mtimes(__DA1.T, cs.mtimes(__K, __nsel))
-        __L2 = cs.SX(4, 4); __L2[:2, :] = 0; __L2[2:, :] = -cs.mtimes(__DA1.T, cs.mtimes(__K, __tsel))
+        __nsel_pusher = np.array([[1, 0],
+                                  [0, 0]])
+        __tsel_pusher = np.array([[0, 0, 0, 0],
+                                  [1,-1, 0, 0]])
+        if self.contactMode == 'A_face_B_edge':
+            __Nn = cs.SX(2, 2); __Nn[0, :] = 0; __Nn[1, :] = -cs.mtimes(__nA1, cs.mtimes(__K, __nsel))
+            __Ln = cs.SX(2, 4); __Ln[0, :] = 0; __Ln[1, :] = -cs.mtimes(__nA1, cs.mtimes(__K, __tsel))
+            __Nt = cs.SX(4, 2); __Nt[:2, :] = 0; __Nt[2:, :] = -cs.mtimes(__DA1.T, cs.mtimes(__K, __nsel))
+            __Lt = cs.SX(4, 4); __Lt[:2, :] = 0; __Lt[2:, :] = -cs.mtimes(__DA1.T, cs.mtimes(__K, __tsel))
+        elif self.contactMode == 'A_edge_B_face':
+            __Nn = cs.SX(2, 2); __Nn[0, :] = 0; __Nn[1, :] = -cs.mtimes(__nB0, cs.mtimes(__K, __nsel) + cs.mtimes(__K_pusher, __nsel_pusher))
+            __Ln = cs.SX(2, 4); __Ln[0, :] = 0; __Ln[1, :] = -cs.mtimes(__nB0, cs.mtimes(__K, __tsel) + cs.mtimes(__K_pusher, __tsel_pusher))
+            __Nt = cs.SX(4, 2); __Nt[:2, :] = 0; __Nt[2:, :] = -cs.mtimes(__DB0.T, cs.mtimes(__K, __nsel) + cs.mtimes(__K_pusher, __nsel_pusher))
+            __Lt = cs.SX(4, 4); __Lt[:2, :] = 0; __Lt[2:, :] = -cs.mtimes(__DB0.T, cs.mtimes(__K, __tsel) + cs.mtimes(__K_pusher, __tsel_pusher))
+        elif self.contactMode == 'A_null_B_null':
+            __Nn = cs.SX.zeros(2, 2)
+            __Ln = cs.SX.zeros(2, 4)
+            __Nt = cs.SX.zeros(4, 2)
+            __Lt = cs.SX.zeros(4, 4)
         #  -------------------------------------------------------------------
         __E = np.kron(np.eye(2), np.ones((2, 1)))
         __mu = self.miu * np.eye(2)
@@ -179,32 +215,51 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         #  -------------------------------------------------------------------
         __M = cs.SX(4*self.n_ctact, 4*self.n_ctact)
 
-        __M[:self.n_ctact, :self.n_ctact] = cs.mtimes(__Nv, cs.mtimes(__A, __N.T)) + __N1
-        __M[:self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.mtimes(__Nv, cs.mtimes(__A, __L.T)) + __L1
-        __M[:self.n_ctact, 3*self.n_ctact:] = 0
+        if self.contactMode == 'A_face_B_edge':
+            __M[:self.n_ctact, :self.n_ctact] = cs.vertcat(cs.mtimes(__N[0, :], cs.mtimes(__A, __NA.T)), cs.mtimes(__N[1, :], cs.mtimes(__A, __NA.T))) + __Nn
+            __M[:self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.vertcat(cs.mtimes(__N[0, :], cs.mtimes(__A, __LA.T)), cs.mtimes(__N[1, :], cs.mtimes(__A, __LA.T))) + __Ln
+            __M[:self.n_ctact, 3*self.n_ctact:] = 0
 
-        __M[self.n_ctact: 3*self.n_ctact, :self.n_ctact] = cs.mtimes(__Lv, cs.mtimes(__A, __N.T)) + __N2
-        __M[self.n_ctact: 3*self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.mtimes(__Lv, cs.mtimes(__A, __L.T)) + __L2
-        __M[self.n_ctact: 3*self.n_ctact, 3*self.n_ctact:] = __E
+            __M[self.n_ctact: 3*self.n_ctact, :self.n_ctact] = cs.vertcat(cs.mtimes(__L[0:2, :], cs.mtimes(__A, __NA.T)), cs.mtimes(__L[2:4, :], cs.mtimes(__A, __NA.T))) + __Nt
+            __M[self.n_ctact: 3*self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.vertcat(cs.mtimes(__L[0:2, :], cs.mtimes(__A, __LA.T)), cs.mtimes(__L[2:4, :], cs.mtimes(__A, __LA.T))) + __Lt
+            __M[self.n_ctact: 3*self.n_ctact, 3*self.n_ctact:] = __E
 
-        __M[3*self.n_ctact:, :self.n_ctact] = __mu
-        __M[3*self.n_ctact:, self.n_ctact: 3*self.n_ctact] = -__E.T
-        __M[3*self.n_ctact:, 3*self.n_ctact:] = 0
+            __M[3*self.n_ctact:, :self.n_ctact] = __mu
+            __M[3*self.n_ctact:, self.n_ctact: 3*self.n_ctact] = -__E.T
+            __M[3*self.n_ctact:, 3*self.n_ctact:] = 0
+        elif self.contactMode == 'A_edge_B_face':
+            __M[:self.n_ctact, :self.n_ctact] = cs.vertcat(cs.mtimes(__N[0, :], cs.mtimes(__A, __NA.T)), cs.mtimes(__N[1, :], cs.mtimes(__A, __NB.T))) + __Nn
+            __M[:self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.vertcat(cs.mtimes(__N[0, :], cs.mtimes(__A, __LA.T)), cs.mtimes(__N[1, :], cs.mtimes(__A, __LB.T))) + __Ln
+            __M[:self.n_ctact, 3*self.n_ctact:] = 0
+
+            __M[self.n_ctact: 3*self.n_ctact, :self.n_ctact] = cs.vertcat(cs.mtimes(__L[0:2, :], cs.mtimes(__A, __NA.T)), cs.mtimes(__L[2:4, :], cs.mtimes(__A, __NB.T))) + __Nt
+            __M[self.n_ctact: 3*self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.vertcat(cs.mtimes(__L[0:2, :], cs.mtimes(__A, __LA.T)), cs.mtimes(__L[2:4, :], cs.mtimes(__A, __LB.T))) + __Lt
+            __M[self.n_ctact: 3*self.n_ctact, 3*self.n_ctact:] = __E
+
+            __M[3*self.n_ctact:, :self.n_ctact] = __mu
+            __M[3*self.n_ctact:, self.n_ctact: 3*self.n_ctact] = -__E.T
+            __M[3*self.n_ctact:, 3*self.n_ctact:] = 0
+        elif self.contactMode == 'A_null_B_null':
+            __M[:self.n_ctact, :self.n_ctact] = cs.vertcat(cs.mtimes(__N[0, :], cs.mtimes(__A, __NA.T)), np.zeros((1, self.n_ctact))) + __Nn
+            __M[:self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.vertcat(cs.mtimes(__N[0, :], cs.mtimes(__A, __LA.T)), np.zeros((1, 2*self.n_ctact))) + __Ln
+            __M[:self.n_ctact, 3*self.n_ctact:] = 0
+
+            __M[self.n_ctact: 3*self.n_ctact, :self.n_ctact] = cs.vertcat(cs.mtimes(__L[0:2, :], cs.mtimes(__A, __NA.T)), np.zeros((2, self.n_ctact))) + __Nt
+            __M[self.n_ctact: 3*self.n_ctact, self.n_ctact: 3*self.n_ctact] = cs.vertcat(cs.mtimes(__L[0:2, :], cs.mtimes(__A, __LA.T)), np.zeros((2, 2*self.n_ctact))) + __Lt
+            __M[self.n_ctact: 3*self.n_ctact, 3*self.n_ctact:] = __E
+
+            __M[3*self.n_ctact:, :self.n_ctact] = __mu
+            __M[3*self.n_ctact:, self.n_ctact: 3*self.n_ctact] = -__E.T
+            __M[3*self.n_ctact:, 3*self.n_ctact:] = 0
         #  -------------------------------------------------------------------
         __sa = cs.vertcat(-cs.mtimes(__nA0, __vp), 0)
         __sb = cs.vertcat(-cs.mtimes(__DA0.T, __vp), 0, 0)
         __q = cs.vertcat(__sa, __sb, 0, 0)
         #  -------------------------------------------------------------------
-        if self.contactMode == 'A_face_B_edge':
-            self.M_ = cs.Function('M_', [__Beta, __theta, __yA0, __yA1],
-                                  [__M], ['b', 't', 'ya0', 'ya1'], ['M_'])
-            self.M = cs.Function('M', [self.beta, self.theta, self.ctact],
-                                 [self.M_(self.beta, self.theta, self.ctact[0,1], self.ctact[1,1])], ['b', 't', 'c'], ['M'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.M_ = cs.Function('M_', [__Beta, __theta, __yA0, __yB0],
-                                [__M], ['b', 't', 'ya0', 'yb0'], ['M_'])
-            self.M = cs.Function('M', [self.beta, self.theta, self.ctact],
-                                 [self.M_(self.beta, self.theta, self.ctact[0,1], self.ctact[2,1])], ['b', 't', 'c'], ['M'])
+        self.M_ = cs.Function('M_', [__Beta, __theta, __yA0, __yA1, __yB0],
+                                [__M], ['b', 't', 'ya0', 'ya1', 'yb0'], ['M_'])
+        self.M = cs.Function('M', [self.beta, self.theta, self.ctact],
+                                [self.M_(self.beta, self.theta, self.ctact[0,1], self.ctact[1,1], self.ctact[2,1])], ['b', 't', 'c'], ['M'])
         self.q_ = cs.Function('q_', [__vp], [__q], ['v'], ['q'])
         self.q = cs.Function('q', [self.vp], [self.q_(self.vp)], ['v'], ['q'])
         self.M_opt_ = self.M_
@@ -214,107 +269,59 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         # dynamic functions
         #  -------------------------------------------------------------------
         # sliderA, sliderB wrench
-        __wrenchA = cs.mtimes(__N.T, __f_norm) + cs.mtimes(__L.T, __f_tan)
-        __wrenchB = cs.mtimes(__JB0.T,cs.mtimes(__TA2B,cs.mtimes(__nsel,__f_norm)+cs.mtimes(__tsel,__f_tan)))
-        if self.contactMode == 'A_face_B_edge':
-            self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__wrenchA], ['b', 't', 'ya0', 'ya1', 'f'], ['wA_'])
-            self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__wrenchB], ['b', 't', 'ya0', 'ya1', 'f'], ['wB_'])
-            self.wrenchA = cs.Function('wrenchA', [self.beta,self.theta,self.ctact,self.z],
-                                       [self.wrenchA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
-            self.wrenchB = cs.Function('wrenchB', [self.beta,self.theta,self.ctact,self.z],
-                                       [self.wrenchB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [__wrenchA], ['b', 't', 'ya0', 'yb0', 'f'], ['wA_'])
-            self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [__wrenchB], ['b', 't', 'ya0', 'yb0', 'f'], ['wB_'])
-            self.wrenchA = cs.Function('wrenchA', [self.beta,self.theta,self.ctact,self.z],
-                                       [self.wrenchA_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
-            self.wrenchB = cs.Function('wrenchB', [self.beta,self.theta,self.ctact,self.z],
-                                       [self.wrenchB_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
+        # __wrenchA = cs.mtimes(__N.T, __f_norm) + cs.mtimes(__L.T, __f_tan)
+        # __wrenchB = cs.mtimes(__JB0.T,cs.mtimes(__TA2B,cs.mtimes(__nsel,__f_norm)+cs.mtimes(__tsel,__f_tan)))
+        __wrenchA = cs.mtimes(__NA.T, __f_norm) + cs.mtimes(__LA.T, __f_tan)
+        __wrenchB = cs.mtimes(__NB.T, __f_norm) + cs.mtimes(__LB.T, __f_tan)
+        self.wrenchA_ = cs.Function('wrenchA_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [__wrenchA], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['wA_'])
+        self.wrenchB_ = cs.Function('wrenchB_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [__wrenchB], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['wB_'])
+        self.wrenchA = cs.Function('wrenchA', [self.beta,self.theta,self.ctact,self.z],
+                                    [self.wrenchA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wA'])
+        self.wrenchB = cs.Function('wrenchB', [self.beta,self.theta,self.ctact,self.z],
+                                    [self.wrenchB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['wB'])
+
         # sliderA twist
         __VA = cs.mtimes(__A, __wrenchA)
         __VB = cs.mtimes(__A, __wrenchB)
-        if self.contactMode == 'A_face_B_edge':
-            self.VA_ = cs.Function('VA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__VA], ['b', 't', 'ya0', 'ya1', 'f'], ['VA_'])
-            self.VB_ = cs.Function('VB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__VB], ['b', 't', 'ya0', 'ya1', 'f'], ['VB_'])
-            self.VA = cs.Function('VA', [self.beta,self.theta,self.ctact,self.z],
-                                  [self.VA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VA'])
-            self.VB = cs.Function('VB', [self.beta,self.theta,self.ctact,self.z],
-                                  [self.VB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VB'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.VA_ = cs.Function('VA_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [__VA], ['b', 't', 'ya0', 'yb0', 'f'], ['VA_'])
-            self.VB_ = cs.Function('VB_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [__VB], ['b', 't', 'ya0', 'yb0', 'f'], ['VB_'])
-            self.VA = cs.Function('VA', [self.beta,self.theta,self.ctact,self.z],
-                                  [self.VA_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VA'])
-            self.VB = cs.Function('VB', [self.beta,self.theta,self.ctact,self.z],
-                                  [self.VB_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VB'])
-        # slider pose
+        self.VA_ = cs.Function('VA_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [__VA], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['VA_'])
+        self.VB_ = cs.Function('VB_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [__VB], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['VB_'])
+        self.VA = cs.Function('VA', [self.beta,self.theta,self.ctact,self.z],
+                                [self.VA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VA'])
+        self.VB = cs.Function('VB', [self.beta,self.theta,self.ctact,self.z],
+                                [self.VB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['VB'])
+
+        # slider twist in world frame
         __fA = cs.mtimes(__RA,__VA)
         __fB = cs.mtimes(__RB,__VB)
-        if self.contactMode == 'A_face_B_edge':
-            self.fA_ = cs.Function('fA_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__fA], ['b', 't', 'ya0', 'ya1', 'c'], ['fa_'])
-            self.fB_ = cs.Function('fB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [__fB], ['b', 't', 'ya0', 'ya1', 'c'], ['fb_'])
-            self.fA = cs.Function('fA', [self.beta, self.theta, self.ctact, self.z],
-                                  [self.fA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fa'])
-            self.fB = cs.Function('fB', [self.beta, self.theta, self.ctact, self.z],
-                                  [self.fB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fb'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.fA_ = cs.Function('fA_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [__fA], ['b', 't', 'ya0', 'yb0', 'c'], ['fa_'])
-            self.fB_ = cs.Function('fB_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [__fB], ['b', 't', 'ya0', 'yb0', 'c'], ['fb_'])
-            self.fA = cs.Function('fA', [self.beta, self.theta, self.ctact, self.z],
-                                  [self.fA_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fa'])
-            self.fB = cs.Function('fB', [self.beta, self.theta, self.ctact, self.z],
-                                  [self.fB_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fb'])
+        self.fA_ = cs.Function('fA_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [__fA], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['fa_'])
+        self.fB_ = cs.Function('fB_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [__fB], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['fb_'])
+        self.fA = cs.Function('fA', [self.beta, self.theta, self.ctact, self.z],
+                                [self.fA_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fa'])
+        self.fB = cs.Function('fB', [self.beta, self.theta, self.ctact, self.z],
+                                [self.fB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'z'], ['fb'])
         # pusher
         __fvp = __vp-cs.mtimes(__JA0,__VA)
-        if self.contactMode == 'A_face_B_edge':
-            self.fvp_ = cs.Function('fvp_', [__Beta,__theta,__yA0,__yA1,__f_ctact,__vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'ya0', 'ya1', 'f', 'v'], ['fp_'])
-            self.fvp = cs.Function('fvp', [self.beta,self.theta,self.ctact,self.z,self.vp],
-                                   [self.fvp_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6],self.vp)], ['b', 't', 'c', 'z', 'v'], ['fp'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.fvp_ = cs.Function('fvp_', [__Beta,__theta,__yA0,__yB0,__f_ctact,__vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'ya0', 'yb0', 'f', 'v'], ['fp_'])
-            self.fvp = cs.Function('fvp', [self.beta,self.theta,self.ctact,self.z,self.vp],
-                                   [self.fvp_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6],self.vp)], ['b', 't', 'c', 'z', 'v'], ['fp'])
+        self.fvp_ = cs.Function('fvp_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact,__vp], [cs.vertcat(0,__fvp[1])], ['b', 't', 'ya0', 'ya1', 'yb0', 'f', 'v'], ['fp_'])
+        self.fvp = cs.Function('fvp', [self.beta,self.theta,self.ctact,self.z,self.vp],
+                                [self.fvp_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6],self.vp)], ['b', 't', 'c', 'z', 'v'], ['fp'])
         #  -------------------------------------------------------------------
 
         # other matrices for debug
         #  -------------------------------------------------------------------
-        __F = cs.mtimes(__JA0.T, __f_norm[0]*__nA0.T + cs.mtimes(__DA0, __f_tan[0:2])) + \
-              cs.mtimes(__JA1.T, __f_norm[1]*__nA1.T + cs.mtimes(__DA1, __f_tan[2:4]))
-        if self.contactMode == 'A_face_B_edge':
-            self.F_ = cs.Function('F_', [__yA0,__yA1,__f_ctact], [__F], ['ya0', 'ya1', 'f'], ['F_'])
-            self.F = cs.Function('F', [self.ctact,self.z], [self.F_(self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['c', 'f'], ['F'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.F_ = cs.Function('F_', [__yA0,__yB0,__f_ctact], [__F], ['ya0', 'yb0', 'f'], ['F_'])
-            self.F = cs.Function('F', [self.ctact,self.z], [self.F_(self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['c', 'f'], ['F'])
+        self.V_ = cs.Function('V_', [__Beta,__yA0,__yA1,__yB0,__f_ctact], [__VA], ['b', 'ya0', 'ya1', 'yb0', 'f'], ['V_'])
+        self.V = cs.Function('V', [self.beta,self.ctact,self.z], [self.V_(self.beta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 'c', 'f'], ['V'])
         #  -------------------------------------------------------------------
-        if self.contactMode == 'A_face_B_edge':
-            self.V_ = cs.Function('V_', [__Beta,__yA0,__yA1,__f_ctact], [__VA], ['b', 'ya0', 'ya1', 'f'], ['V_'])
-            self.V = cs.Function('V', [self.beta,self.ctact,self.z], [self.V_(self.beta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 'c', 'f'], ['V'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.V_ = cs.Function('V_', [__Beta,__yA0,__yB0,__f_ctact], [__VA], ['b', 'ya0', 'yb0', 'f'], ['V_'])
-            self.V = cs.Function('V', [self.beta,self.ctact,self.z], [self.V_(self.beta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 'c', 'f'], ['V'])
+        if self.contactMode == 'A_face_B_edge': __vpB = cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA)
+        elif self.contactMode == 'A_edge_B_face': __vpB = cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB)
+        elif self.contactMode == 'A_null_B_null': __vpB = cs.SX.zeros(2, 1)
+        self.vpB_ = cs.Function('vpB_', [__Beta,__theta,__yA0,__yA1,__yB0,__f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'ya0', 'ya1', 'yb0', 'f'], ['v'])
+        self.vpB = cs.Function('vpB', [self.beta,self.theta,self.ctact,self.z], 
+                                [self.vpB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
         #  -------------------------------------------------------------------
-        if self.contactMode == 'A_face_B_edge':
-            __vpB = cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA)
-            self.vpB_ = cs.Function('vpB_', [__Beta,__theta,__yA0,__yA1,__f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'ya0', 'ya1', 'f'], ['v'])
-            self.vpB = cs.Function('vpB', [self.beta,self.theta,self.ctact,self.z], 
-                                   [self.vpB_(self.beta,self.theta,self.ctact[0,1],self.ctact[1,1],self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
-        elif self.contactMode == 'A_edge_B_face':
-            __vpB = cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB)
-            self.vpB_ = cs.Function('vpB_', [__Beta,__theta,__yA0,__yB0,__f_ctact], [cs.vertcat(0, __vpB[1])], ['b', 't', 'ya0', 'yb0', 'f'], ['v'])
-            self.vpB = cs.Function('vpB', [self.beta,self.theta,self.ctact,self.z], 
-                                   [self.vpB_(self.beta,self.theta,self.ctact[0,1],self.ctact[2,1],self.z[:6])], ['b', 't', 'c', 'f'], ['v'])
-        #  -------------------------------------------------------------------
-        if self.contactMode == 'A_face_B_edge':
-            self.N_ = cs.Function('N_', [__yA0,__yA1], [__N], ['ya0', 'ya1'], ['N_'])
-            self.N = cs.Function('N', [self.ctact], [self.N_(self.ctact[0,1],self.ctact[1,1])], ['c'], ['N'])
-            self.L_ = cs.Function('L_', [__yA0,__yA1], [__L], ['ya0', 'ya1'], ['L_'])
-            self.L = cs.Function('L', [self.ctact], [self.L_(self.ctact[0,1],self.ctact[1,1])], ['c'], ['L'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.N_ = cs.Function('N_', [__yA0,__yB0], [__N], ['ya0', 'yb0'], ['N_'])
-            self.N = cs.Function('N', [self.ctact], [self.N_(self.ctact[0,1],self.ctact[2,1])], ['c'], ['N'])
-            self.L_ = cs.Function('L_', [__yA0,__yB0], [__L], ['ya0', 'yb0'], ['L_'])
-            self.L = cs.Function('L', [self.ctact], [self.L_(self.ctact[0,1],self.ctact[2,1])], ['c'], ['L'])
+        self.N_ = cs.Function('N_', [__Beta,__yA0,__yA1,__yB0], [__N], ['b', 'ya0', 'ya1', 'yb0'], ['N_'])
+        self.N = cs.Function('N', [self.beta,self.ctact], [self.N_(self.beta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1])], ['b', 'c'], ['N'])
+        self.L_ = cs.Function('L_', [__Beta,__yA0,__yA1,__yB0], [__L], ['b', 'ya0', 'ya1', 'yb0'], ['L_'])
+        self.L = cs.Function('L', [self.beta,self.ctact], [self.L_(self.beta,self.ctact[0,1],self.ctact[1,1],self.ctact[2,1])], ['b', 'c'], ['L'])
         #  -------------------------------------------------------------------
         
         # define symbols for building optimization problems
@@ -335,6 +342,11 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB))
                 __dx[2] = (__VB - __VA)[2]
+            elif self.contactMode == 'A_null_B_null':
+                __dx = cs.SX(3,1)
+                __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
+                __dx[1] = 0.
+                __dx[2] = (__VB - __VA)[2]
         else:
             self.Nx = 6
             self.x_opt = cs.SX.sym('x', self.Nx)
@@ -351,6 +363,12 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
                 __dx = cs.SX(3,1)
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB))
+                __dx[2] = (__VB - __VA)[2]
+                __dx[3:] = cs.mtimes(__RA, __VA)
+            elif self.contactMode == 'A_null_B_null':
+                __dx = cs.SX(3,1)
+                __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
+                __dx[1] = 0.
                 __dx[2] = (__VB - __VA)[2]
                 __dx[3:] = cs.mtimes(__RA, __VA)
         
@@ -376,16 +394,23 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         self.lbs = [-cs.inf]*self.Ns
         self.ubs = [cs.inf]*self.Ns
 
-        self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1])], ['b', 'x'], ['M_opt'])
-        self.q_opt = cs.Function('q_opt', [self.u_opt], [self.q_opt_(self.u_opt)], ['u'], ['q_opt'])
-        
+        self.f_opt_ = cs.Function('f_opt_', [__Beta, __theta, __yA0, __yA1, __yB0, __vp, __f_ctact], [__dx], ['b', 't', 'ya0', 'ya1', 'yb0', 'vp', 'f'], ['f_opt_'])
         if self.contactMode == 'A_face_B_edge':
-            self.f_opt_ = cs.Function('f_opt_', [__Beta, __theta, __yA0, __yA1, __vp, __f_ctact], [__dx], ['b', 't', 'ya0', 'ya1', 'vp', 'f'], ['f_opt_'])
+            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt, __yB0], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], __yB0)], ['b', 'x', 'yb0'], ['M_opt'])
+            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt, __yB0],
+                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], __yB0, self.u_opt, self.z_opt[:6])],
+                                     ['b', 'x', 'u', 'z', 'yb0'], ['f_opt'])
         elif self.contactMode == 'A_edge_B_face':
-            self.f_opt_ = cs.Function('f_opt_', [__Beta, __theta, __yA0, __yB0, __vp, __f_ctact], [__dx], ['b', 't', 'ya0', 'yb0', 'vp', 'f'], ['f_opt_'])
-        self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
-                                 [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], self.u_opt, self.z_opt[:6])],
-                                 ['b', 'x', 'u', 'z'], ['f_opt'])
+            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt, __yA1], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], __yA1, self.x_opt[1])], ['b', 'x', 'ya1'], ['M_opt'])
+            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt, __yA1],
+                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], __yA1, self.x_opt[1], self.u_opt, self.z_opt[:6])],
+                                     ['b', 'x', 'u', 'z', 'ya1'], ['f_opt'])
+        elif self.contactMode == 'A_null_B_null':
+            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], 0., 0.)], ['b', 'x'], ['M_opt'])
+            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
+                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], 0., 0., self.u_opt, self.z_opt[:6])],
+                                     ['b', 'x', 'u', 'z'], ['f_opt'])
+        self.q_opt = cs.Function('q_opt', [self.u_opt], [self.q_opt_(self.u_opt)], ['u'], ['q_opt'])
         
         # (complementary) constraints
         self.Ng_u = 8
