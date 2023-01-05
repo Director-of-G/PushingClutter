@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from shapely.geometry import Polygon, Point
 from shapely import ops, affinity
+from shapely import intersection
 #  -------------------------------------------------------------------
 import matlab.engine as engine
 #  -------------------------------------------------------------------
@@ -205,17 +206,17 @@ class buildDoubleSliderSimObj():
         # dynamic model initialization
         self.db_dyn = {}
         self.db_dyn['A_face_B_edge'] = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
-            planning_config['dynamics'],
+            configDict,
             contactMode='A_face_B_edge',
             contactNum=2
         )
         self.db_dyn['A_edge_B_face'] = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
-            planning_config['dynamics'],
+            configDict,
             contactMode='A_edge_B_face',
             contactNum=2
         )
         self.db_dyn['A_null_B_null'] = sliding_pack.dyn_mc.Double_Sys_sq_slider_quasi_static_ellip_lim_surf(
-            planning_config['dynamics'],
+            configDict,
             contactMode='A_null_B_null',
             contactNum=2
         )
@@ -325,14 +326,14 @@ class buildDoubleSliderSimObj():
         # ab_ctact_pt = get_contact_point(beta, x_a_new, x_b_new)  # penetration might occur
         ctact_new = deepcopy(ctact)
         # update the push point
-        ctact_new[:, 0] = ctact[:, 0] + self.dt*dyn.fvp(beta, theta, ctact.T, z_ctact, vp)
+        ctact_new[:, 0] = ctact[:, 0] + self.dt*dyn.fvp(beta, theta, ctact.T, z_ctact, vp).toarray().squeeze()
         
         # update the slider's contact point and sliderB's pose
         if contactMode == 'A_face_B_edge':
-            ctact_new[:, 1] = ctact[:, 1] + self.dt*dyn.vpB(beta, theta, ctact.T, z_ctact)
+            ctact_new[:, 1] = ctact[:, 1] + self.dt*dyn.vpB(beta, theta, ctact.T, z_ctact).toarray().squeeze()
             x_b_new[:2] = (x_a_new[:2] + R_a[:2, :2] @ ctact_new[:, 1]) - R_b[:2, :2] @ np.array(ctact_new[:, 2]).squeeze()  # no penetration is guaranteed
         elif contactMode == 'A_edge_B_face':
-            ctact_new[:, 2] = ctact[:, 2] + self.dt*dyn.vpB(beta, theta, ctact.T, z_ctact)
+            ctact_new[:, 2] = ctact[:, 2] + self.dt*dyn.vpB(beta, theta, ctact.T, z_ctact).toarray().squeeze()
             x_b_new[:2] = (x_a_new[:2] + R_a[:2, :2] @ ctact_new[:, 1]) - R_b[:2, :2] @ np.array(ctact_new[:, 2]).squeeze()  # no penetration is guaranteed
         elif contactMode == 'A_null_B_null':
             pass

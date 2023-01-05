@@ -19,8 +19,31 @@ import matplotlib.patches as patches
 import matplotlib.transforms as transforms
 import casadi as cs
 # -------------------------------------------------------------------
+from sliding_pack.simulation.double_sliders import rotation_matrix2X2
+# -------------------------------------------------------------------
 import sliding_pack
 # -------------------------------------------------------------------
+
+
+def compute_slider_pose(x, beta):
+    """
+        Compute sliders' poses from state variable x
+        :param x: Nx=7
+        :param beta: slider geometry
+        :return: x_a, x_b
+    """
+    ya0, ya1, yb0 = x[0], x[1], x[2]
+    dtheta = x[3]
+    x_a = np.array(x[4:])
+    x_b = np.zeros_like(x_a)
+    x_b[2] = x_a[2] + dtheta
+    
+    ctact_a1 = np.array([0.5*beta[0], ya1])
+    ctact_b0 = np.array([-0.5*beta[0], yb0])
+    x_b[:2] = x_a[:2] + rotation_matrix2X2(x_a[2]) @ ctact_a1 - rotation_matrix2X2(x_b[2]) @ ctact_b0
+    
+    return x_a, x_b
+    
 
 class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
     # The dynamic model for single-pusher-double-slider.
@@ -28,7 +51,7 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
     # The slider A has a face contact. and the slider B has a vertex contact.
     # The dynamic model is under quasi-static assumption.
     # The dynamic model is approximated by an ellipsoid.
-    def __init__(self, configDict, contactNum=2., contactMode='A_face_B_edge', controlRelPose=True):
+    def __init__(self, configDict, contactNum=2., contactMode='A_face_B_edge', controlRelPose=False):
 
         # init parameters
         #  -------------------------------------------------------------------
@@ -206,8 +229,12 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
             __Nt = cs.SX.zeros(4, 2)
             __Lt = cs.SX.zeros(4, 4)
         #  -------------------------------------------------------------------
-        __E = np.kron(np.eye(2), np.ones((2, 1)))
-        __mu = self.miu * np.eye(2)
+        if self.contactMode == 'A_face_B_edge' or self.contactMode == 'A_edge_B_face':
+            __E = np.kron(np.eye(2), np.ones((2, 1)))
+            __mu = self.miu * np.eye(2)
+        elif self.contactMode == 'A_null_B_null':
+            __E = np.kron(np.array([[1., 0.], [0., 0.]]), np.ones((2, 1)))
+            __mu = self.miu * np.array([[1., 0.], [0., 0.]])
         # __mu = np.diag([0.2, 0.5])
         #  -------------------------------------------------------------------
 
@@ -333,44 +360,55 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
             self.ubx = [0.5*self.y_length, 0.5*self.y_length, cs.inf]
             
             if self.contactMode == 'A_face_B_edge':
-                __dx = cs.SX(3,1)
+                __dx = cs.SX(self.Nx,1)
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
                 __dx[2] = (__VB - __VA)[2]
             elif self.contactMode == 'A_edge_B_face':
-                __dx = cs.SX(3,1)
+                __dx = cs.SX(self.Nx,1)
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB))
                 __dx[2] = (__VB - __VA)[2]
             elif self.contactMode == 'A_null_B_null':
-                __dx = cs.SX(3,1)
+                __dx = cs.SX(self.Nx,1)
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = 0.
                 __dx[2] = (__VB - __VA)[2]
         else:
-            self.Nx = 6
+            self.Nx = 7
             self.x_opt = cs.SX.sym('x', self.Nx)
-            self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -cs.inf, -cs.inf, -cs.inf, -cs.inf]
-            self.ubx = [0.5*self.y_length, 0.5*self.y_length, 0., cs.inf, cs.inf, cs.inf]
+            #  -------------------------------------------------------------------
+            #  x[0] - yA0
+            #  x[1] - yA1
+            #  x[2] - yB0
+            #  x[3] - dtheta (thetaB-thetaA)
+            #  x[4] - xA
+            #  x[5] - yA
+            #  x[6] - thetaA
+            #  -------------------------------------------------------------------
+            self.lbx = [-0.5*self.y_length, -0.5*self.y_length, -0.5*self.y_length, -cs.inf, -cs.inf, -cs.inf, -cs.inf]
+            self.ubx = [0.5*self.y_length, 0.5*self.y_length, 0.5*self.y_length, 0., cs.inf, cs.inf, cs.inf]
             
             if self.contactMode == 'A_face_B_edge':
-                __dx = cs.SX(6,1)
+                __dx = cs.SX(self.Nx,1)
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TB2A, cs.mtimes(__JB0, __VB))-cs.mtimes(__JA1, __VA))
-                __dx[2] = (__VB - __VA)[2]
-                __dx[3:] = cs.mtimes(__RA, __VA)
+                __dx[2] = 0.
+                __dx[3] = (__VB - __VA)[2]
+                __dx[4:] = cs.mtimes(__RA, __VA)
             elif self.contactMode == 'A_edge_B_face':
-                __dx = cs.SX(3,1)
-                __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
-                __dx[1] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB))
-                __dx[2] = (__VB - __VA)[2]
-                __dx[3:] = cs.mtimes(__RA, __VA)
-            elif self.contactMode == 'A_null_B_null':
-                __dx = cs.SX(3,1)
+                __dx = cs.SX(self.Nx,1)
                 __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
                 __dx[1] = 0.
-                __dx[2] = (__VB - __VA)[2]
-                __dx[3:] = cs.mtimes(__RA, __VA)
+                __dx[2] = cs.mtimes(np.expand_dims([0, 1], axis=0), cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA))-cs.mtimes(__JB0, __VB))
+                __dx[3] = (__VB - __VA)[2]
+                __dx[4:] = cs.mtimes(__RA, __VA)
+            elif self.contactMode == 'A_null_B_null':
+                __dx = cs.SX(self.Nx,1)
+                __dx[0] = cs.mtimes(np.expand_dims([0, 1], axis=0), __vp - cs.mtimes(__JA0, __VA))
+                __dx[1:3] = 0.
+                __dx[3] = (__VB - __VA)[2]
+                __dx[4:] = cs.mtimes(__RA, __VA)
         
         self.Nu = 2
         self.u_opt = cs.SX.sym('u', self.Nu)
@@ -390,25 +428,25 @@ class Double_Sys_sq_slider_quasi_static_ellip_lim_surf():
         # slack variables
         self.Ns = 8
         self.s_opt = cs.SX.sym('s', self.Ns)
-        self.s0 = [1.]*self.Ns
-        self.lbs = [-cs.inf]*self.Ns
-        self.ubs = [cs.inf]*self.Ns
+        self.s0 = [1e-12]*self.Ns
+        self.lbs = [-1e-10]*self.Ns
+        self.ubs = [1e-10]*self.Ns
 
         self.f_opt_ = cs.Function('f_opt_', [__Beta, __theta, __yA0, __yA1, __yB0, __vp, __f_ctact], [__dx], ['b', 't', 'ya0', 'ya1', 'yb0', 'vp', 'f'], ['f_opt_'])
         if self.contactMode == 'A_face_B_edge':
-            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt, __yB0], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], __yB0)], ['b', 'x', 'yb0'], ['M_opt'])
-            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt, __yB0],
-                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], self.x_opt[1], __yB0, self.u_opt, self.z_opt[:6])],
-                                     ['b', 'x', 'u', 'z', 'yb0'], ['f_opt'])
-        elif self.contactMode == 'A_edge_B_face':
-            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt, __yA1], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], __yA1, self.x_opt[1])], ['b', 'x', 'ya1'], ['M_opt'])
-            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt, __yA1],
-                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], __yA1, self.x_opt[1], self.u_opt, self.z_opt[:6])],
-                                     ['b', 'x', 'u', 'z', 'ya1'], ['f_opt'])
-        elif self.contactMode == 'A_null_B_null':
-            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], 0., 0.)], ['b', 'x'], ['M_opt'])
+            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[3]), self.x_opt[0], self.x_opt[1], self.x_opt[2])], ['b', 'x'], ['M_opt'])
             self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
-                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[2]), self.x_opt[0], 0., 0., self.u_opt, self.z_opt[:6])],
+                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[3]), self.x_opt[0], self.x_opt[1], self.x_opt[2], self.u_opt, self.z_opt[:6])],
+                                     ['b', 'x', 'u', 'z'], ['f_opt'])
+        elif self.contactMode == 'A_edge_B_face':
+            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[3]), self.x_opt[0], self.x_opt[1], self.x_opt[2])], ['b', 'x'], ['M_opt'])
+            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
+                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[3]), self.x_opt[0], self.x_opt[1], self.x_opt[2], self.u_opt, self.z_opt[:6])],
+                                     ['b', 'x', 'u', 'z'], ['f_opt'])
+        elif self.contactMode == 'A_null_B_null':
+            self.M_opt = cs.Function('M_opt', [self.beta, self.x_opt], [self.M_opt_(self.beta, cs.vertcat(0., self.x_opt[3]), self.x_opt[0], 0., 0.)], ['b', 'x'], ['M_opt'])
+            self.f_opt = cs.Function('f_opt', [self.beta, self.x_opt, self.u_opt, self.z_opt],
+                                     [self.f_opt_(self.beta, cs.vertcat(0., self.x_opt[3]), self.x_opt[0], 0., 0., self.u_opt, self.z_opt[:6])],
                                      ['b', 'x', 'u', 'z'], ['f_opt'])
         self.q_opt = cs.Function('q_opt', [self.u_opt], [self.q_opt_(self.u_opt)], ['u'], ['q_opt'])
         

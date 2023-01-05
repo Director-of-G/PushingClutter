@@ -35,6 +35,8 @@ from rrt_pack.search_space import search_space as sspace
 
 from rrt_pack.search_space import planar_search_space as pl_sspace
 
+from rrt_pack.search_space import planar_index as pl_idx
+
 # ----------------------------------------------------------------
 # import from utilities folder
 # ----------------------------------------------------------------

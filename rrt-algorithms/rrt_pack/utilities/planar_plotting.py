@@ -3,6 +3,7 @@
 
 import plotly as py
 from plotly import graph_objs as go
+from shapely.plotting import plot_polygon
 
 from matplotlib import pyplot as plt
 from mpl_toolkits.mplot3d.axes3d import Axes3D
@@ -61,12 +62,18 @@ class PlanarPlot(object):
         self.obstacles = result['obstacles']
         self.path = np.array(result['path'])
 
-    def plot_obstacles(self, ax, Obstacles):
+    def plot_obstacles(self, ax, Obstacles, scatter=False):
         for i in range(len(Obstacles)):
-            x1, y1, x2, y2 = Obstacles[i]
-            width, height = x2 - x1, y2 - y1
-            rect = plt.Rectangle((x1, y1), width, height, color='grey')
-            ax.add_patch(rect)
+            if not scatter:
+                x1, y1, x2, y2 = Obstacles[i]
+                width, height = x2 - x1, y2 - y1
+                rect = plt.Rectangle((x1, y1), width, height, color='grey')
+                ax.add_patch(rect)
+            else:
+                coord = Obstacles[i]
+                ptr_set, arrow = self.plot_slider(coord)
+                ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
+                ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='red')
         
         return ax
     
@@ -96,10 +103,47 @@ class PlanarPlot(object):
             
         return dirs, pts
     
-    def plot_rrt_result(self):
+    def plot_convex_hull(self, ax):
+        """
+        Plot the convex hull of obstacles
+        :param ax: the canvas
+        """
+        plot_polygon(self.X.obs.obs_conv_hull, ax=ax, add_points=False, color='lightgreen', alpha=0.3)
+    
+    def plot_debug(self, samples):
+        """
+        Plot sampled poses.
+        :param samples: array of (x, y, theta)
+        """
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        self.plot_obstacles(ax, self.obstacles)
+        for i in range(len(self.obstacles)):
+            coord = self.obstacles[i]
+            ptr_set, arrow = self.plot_slider(coord)
+            ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
+            ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='red')
+        for i in range(len(samples)):
+            coord = samples[i]
+            ptr_set, arrow = self.plot_slider(coord)
+            ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
+            ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='blue')
+        plt.xlim([0.0, 0.5])
+        plt.ylim([0.0, 0.5])
+        plt.gca().set_aspect('equal')
+        plt.show()
+    
+    def plot_rrt_result(self, scatter=False):
+        """
+        Plot obstacles, sliders (key frame locations, orientations)
+        :param scatter: if True, obstacles are described by (xmin, ymin, xmax, ymax);
+                        if False, obstacles are described by (x, y, theta)
+        """
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        self.plot_obstacles(ax, self.obstacles, scatter)
+        
+        if scatter:
+            self.plot_convex_hull(ax)
         
         dirs, pts = self.plot_contact()
         
@@ -398,13 +442,18 @@ if __name__ == '__main__':
                       X=X)
     
     # plot 2d visualization
-    plot.load_result_file()
-    plot.plot_rrt_result()
+    # plot.load_result_file()
+    # plot.plot_rrt_result()
     
     # test plot the sampled X_free
-    plot.fig = plt.figure()
-    plot.ax = Axes3D(plot.fig)
-    plot.plot_cylindrical_surface(1, 1)
-    plot.plot_cylindrical_surface(1, 2)
-    plot.plot_pointcloud(plot_col=False, plot_free=True)
-    plot.draw(auto_open=True)
+    # plot.fig = plt.figure()
+    # plot.ax = Axes3D(plot.fig)
+    # plot.plot_cylindrical_surface(1, 1)
+    # plot.plot_cylindrical_surface(1, 2)
+    # plot.plot_pointcloud(plot_col=False, plot_free=True)
+    # plot.draw(auto_open=True)
+    
+    samples = np.load('../../output/data/rrt_planar_pushing_samples.npy')
+    obstacles = np.load('../../output/data/rrt_planar_pushing_obstacles.npy')
+    plot.obstacles = obstacles
+    plot.plot_debug(samples)

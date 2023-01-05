@@ -1,13 +1,15 @@
 import random
 
 import numpy as np
+import random
+from shapely import contains
 
 from rrt_pack.rrt.planar_tree import PlanarTree
-from rrt_pack.utilities.geometry import steer, sweep
+from rrt_pack.utilities.geometry import steer, sweep, gen_polygon, rotation_matrix, Revolute
 
 
 class PlanarRRTBase(object):
-    def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01):
+    def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01, pri=0.0):
         """
         Template RRT planner
         :param X: Search Space
@@ -17,6 +19,7 @@ class PlanarRRTBase(object):
         :param max_samples: max number of samples to take
         :param r: resolution of points to sample along edge when checking for collisions
         :param prc: probability of checking whether there is a solution
+        :param pri: probability of informed sampling (steer from current tree node)
         """
         self.X = X
         self.samples_taken = 0
@@ -24,6 +27,7 @@ class PlanarRRTBase(object):
         self.Q = Q
         self.r = r
         self.prc = prc
+        self.pri = pri
         self.x_init = x_init
         self.x_goal = x_goal
         self.trees = []  # list of all trees
@@ -72,6 +76,62 @@ class PlanarRRTBase(object):
         :return: tuple, nearest vertex to x
         """
         return next(self.nearby(tree, x, 1))
+    
+    def new_from_current(self, tree, q):
+        """
+        Return a new steered vertex from random current vertex
+        :param tree: int, tree being searched
+        :param q: length of edge when steering
+        """
+        v = random.sample(self.trees[tree].E.keys(), k=1)[0]
+        
+        # random a push face, and random a push point
+        face_list = ['+x', '-x', '+y', '-y']
+        f = random.choice(face_list)
+        if f == '+x':
+            local_xc, local_yc = np.random.uniform(-0.5*self.X.geom[1], 0.5*self.X.geom[1]), -0.5*self.X.geom[0]
+        elif f == '-x':
+            local_xc, local_yc = np.random.uniform(-0.5*self.X.geom[1], 0.5*self.X.geom[1]), -0.5*self.X.geom[0]
+        elif f == '+y':
+            local_xc, local_yc = np.random.uniform(-0.5*self.X.geom[0], 0.5*self.X.geom[0]), -0.5*self.X.geom[1]
+        elif f == '-y':
+            local_xc, local_yc = np.random.uniform(-0.5*self.X.geom[0], 0.5*self.X.geom[0]), -0.5*self.X.geom[1]
+        
+        # random a push angle
+        pt_gamma = np.random.uniform(-np.arctan2(self.X.miu, 1.), np.arctan2(self.X.miu, 1.))
+        slope = np.tan(0.5*np.pi+pt_gamma)
+        # center of rotation in local coordinates
+        local_xr = -self.X.ab_ratio / (-local_yc / slope + local_xc)
+        local_yr = slope * local_xc
+        
+        # convert to global frame
+        if f == '+x':
+            yaw = v[2] + 0.5*np.pi
+        elif f == '-x':
+            yaw = v[2] - 0.5*np.pi
+        elif f == '+y':
+            yaw = v[2] + np.pi
+        elif f == '-y':
+            yaw = v[2]
+        global_xr, global_yr = v[:2] + rotation_matrix(yaw) @ np.array([local_xr, local_yr])
+        
+        # compute revolution
+        revol = Revolute(finite=True, x=global_xr, y=global_yr, theta=0.5*np.pi)
+        x_new = sweep(v, None, revol, q)
+        feas_index = -1
+        for i in range(x_new.shape[1]):
+            if self.trees[tree].V.count(x_new[:, i]) == 0 and \
+                self.X.obstacle_free(x_new[:, i]) and \
+                self.X.collision_free(v, x_new[:, i], self.r):
+                feas_index = i
+            else:
+                break
+        
+        if feas_index > -1:
+            print('Generating new node from current ones by steering!')
+            return True, tuple(x_new[:, feas_index]), v
+        else:
+            return False, None, None
 
     def new_and_near(self, tree, q):
         """
@@ -80,6 +140,13 @@ class PlanarRRTBase(object):
         :param q: length of edge when steering
         :return: vertex, new steered vertex, vertex, nearest vertex in tree to new vertex
         """
+        # choose new vertex from current vertex
+        if self.pri and random.random() < self.pri:
+            success, x_new, x_nearest = self.new_from_current(tree, q)
+            if success:
+                return x_new, x_nearest
+        
+        # else random choose a new vertex
         x_rand = self.X.sample_free()
         x_nearest = self.get_nearest(tree, x_rand)
         revol = self.X.pose2steer(x_nearest, x_rand)
@@ -119,6 +186,11 @@ class PlanarRRTBase(object):
                     return False
                 self.add_vertex(tree, x_b)
                 self.add_edge(tree, x_b, x_a)
+                if self.X.goal_mode == 'alterable':
+                    new_poly = gen_polygon(x_b, geom=[0.07, 0.12])
+                    if not contains(self.X.obs.obs_conv_hull, new_poly):
+                        self.x_goal = x_b
+                        self.X.goal_mode = 'invariant'
                 return True
             return False
         else:
@@ -131,6 +203,11 @@ class PlanarRRTBase(object):
                     return False
                 self.add_vertex(tree, x_a)
                 self.add_edge(tree, x_a, x_b)
+                if self.X.goal_mode == 'alterable':
+                    new_poly = gen_polygon(x_a, geom=[0.07, 0.12])
+                    if not contains(self.X.obs.obs_conv_hull, new_poly):
+                        self.x_goal = x_a
+                        self.X.goal_mode = 'invariant'
                 return True
             return False
 
@@ -141,10 +218,10 @@ class PlanarRRTBase(object):
         :return: True if can be added, False otherwise
         """
         x_nearest = self.get_nearest(tree, self.x_goal)
-        if self.x_goal in self.trees[tree].E and x_nearest in self.trees[tree].E[self.x_goal]:
+        if self.x_goal in self.trees[tree].E and ((x_nearest == self.x_goal) or (x_nearest in self.trees[tree].E[self.x_goal])):
             # tree is already connected to goal using nearest vertex
             return True
-        if self.X.collision_free(x_nearest, self.x_goal, self.r) and self.X.flatness_free(x_nearest, self.x_goal):  # check if obstacle-free
+        if self.X.collision_free(x_nearest, self.x_goal, self.r) and self.X.flatness_free(x_nearest, self.x_goal)[0]:  # check if obstacle-free
             return True
         return False
 
@@ -167,7 +244,8 @@ class PlanarRRTBase(object):
         :param tree: rtree of all Vertices
         """
         x_nearest = self.get_nearest(tree, self.x_goal)
-        self.trees[tree].E[self.x_goal] = x_nearest
+        if x_nearest != self.x_goal:
+            self.trees[tree].E[self.x_goal] = x_nearest
 
     def reconstruct_path(self, tree, x_init, x_goal):
         """

@@ -3,6 +3,7 @@
 
 import numpy as np
 from rtree import index
+import random
 
 from shapely.geometry import Point, Polygon
 from shapely.ops import nearest_points
@@ -11,9 +12,13 @@ from rrt_pack.utilities.math import angle_limit, angle_diff
 from rrt_pack.utilities.geometry import es_points_along_line, es_points_along_arc, Revolute, rotation_matrix
 from rrt_pack.utilities.obstacle_generation import obstacle_generator
 
+from rrt_pack.search_space.planar_index import PlanarIndex
+
+
+DEFAULT_GEOM = [0.07, 0.12]
 
 class PlanarSearchSpace(object):
-    def __init__(self, dimension_lengths, O=None):
+    def __init__(self, dimension_lengths, O=None, O_file=None, O_index=None):
         """
         Initialize Search Space
         :param dimension_lengths: range of each dimension
@@ -35,12 +40,20 @@ class PlanarSearchSpace(object):
         if any(i[0] >= i[1] for i in dimension_lengths):
             raise Exception("Dimension start must be less than dimension end")
         self.dimension_lengths = dimension_lengths  # length of each dimension
-        p = index.Property()
-        p.dimension = int(len(O[0]) / 2)
         if O is None:
-            self.obs = index.Index(interleaved=True, properties=p)
+            # load obstacle from file
+            # planarIndex in place of r-tree
+            # self.obs = index.Index(interleaved=True, properties=p)
+            self.goal_mode = 'alterable'
+            O = np.load(O_file)
+            O = np.delete(O, O_index, axis=0)  # delete the pushed object
+            shape = [DEFAULT_GEOM for i in range(len(O))]
+            self.obs = PlanarIndex(O, shape)
         else:
             # r-tree representation of obstacles
+            self.goal_mode = 'invariant'
+            p = index.Property()
+            p.dimension = int(len(O[0]) / 2)
             # sanity check
             if any(len(o) / 2 != p.dimension for o in O):
                 raise Exception("Obstacle has incorrect dimension definition")
@@ -53,7 +66,7 @@ class PlanarSearchSpace(object):
         self.slider_relcoords = np.array([[ geom[0], geom[1]],  # quad I
                                           [-geom[0], geom[1]],  # quad II
                                           [-geom[0],-geom[1]],  # quad III
-                                          [ geom[0],-geom[1]]]) # quadIV
+                                          [ geom[0],-geom[1]]]) # quad IV
         self.slider_relcoords = self.slider_relcoords.transpose(1, 0)/2
         
     def create_slider_dynamics(self, ratio, miu):
@@ -240,6 +253,10 @@ class PlanarSearchSpace(object):
 
             pt_set1 = np.concatenate((pt_set1, np.expand_dims([nearest_pt1[0].x, nearest_pt1[1].y], axis=1)), axis=1)
             pt_set2 = np.concatenate((pt_set2, np.expand_dims([nearest_pt2[0].x, nearest_pt2[1].y], axis=1)), axis=1)
+            
+        # the centerpoint
+        pt_set1 = np.concatenate((pt_set1, np.expand_dims(start[:2], axis=1)), axis=1)
+        pt_set2 = np.concatenate((pt_set2, np.expand_dims(end[:2], axis=1)), axis=1)
         
         return pt_set1, pt_set2
 
@@ -248,7 +265,22 @@ class PlanarSearchSpace(object):
         Return a random location within X
         :return: random location within X (not necessarily X_free)
         """
-        x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
+        rand = random.random()
+        # if rand < 0.15:
+        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.4*np.pi], 
+        #                           np.r_[self.dimension_lengths[:2, 1], 0.6*np.pi])
+        # elif 0.15 <= rand < 0.30:
+        if rand < 0.60:
+            x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], -0.6*np.pi], 
+                                  np.r_[self.dimension_lengths[:2, 1], -0.4*np.pi])
+        # elif 0.30 <= rand < 0.45:
+        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], -0.1*np.pi], 
+        #                           np.r_[self.dimension_lengths[:2, 1], 0.1*np.pi])
+        # elif 0.45 <= rand < 0.60:
+        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.9*np.pi], 
+        #                           np.r_[self.dimension_lengths[:2, 1], 1.1*np.pi])
+        else:
+            x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
         return tuple(x)
 
 
@@ -271,11 +303,11 @@ if __name__ == '__main__':
 
     # Letter 'F' with tunnel width=0.1
     Obstacles = np.array([(0.0, 0.0, 0.5, 0.025), 
-                        (0.0, 0.025, 0.025, 0.5),
-                        (0.125, 0.025, 0.5, 0.175),
-                        (0.025, 0.475, 0.5, 0.5),
-                        (0.475, 0.175, 0.5, 0.475),
-                        (0.125, 0.275, 0.475, 0.375)])
+                          (0.0, 0.025, 0.025, 0.5),
+                          (0.125, 0.025, 0.5, 0.175),
+                          (0.025, 0.475, 0.5, 0.5),
+                          (0.475, 0.175, 0.5, 0.475),
+                          (0.125, 0.275, 0.475, 0.375)])
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=[0.07, 0.12])
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)

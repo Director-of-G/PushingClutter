@@ -32,7 +32,7 @@ class buildDoubleSliderOptObj():
         # define weight matrix, which will be used in the cost function
         self.W_x = cs.diag(cs.SX(configDict['W_x']))[:self.dyn.Nx, :self.dyn.Nx]
         if self.controlRelPose is not True:
-            self.W_x[:3, :3] = 0.
+            self.W_x[:4, :4] = 0.
         self.W_u = cs.diag(cs.SX(configDict['W_u']))[:self.dyn.Nu, :self.dyn.Nu]
         self.K_goal = configDict['K_goal']
         if X_nom_val is None:
@@ -278,19 +278,23 @@ class buildDoubleSliderOptObj():
             U_warmStart = cs.DM(U_warmStart)
         if X_warmStart is not None:
             for i in range(self.TH-1):
-                self.args.x0 += (np.array(x0)+(X_warmStart[:, idx+i]-X_warmStart[:, idx])).elements()
+                # self.args.x0 += (np.array(x0)+(X_warmStart[:, idx+i]-X_warmStart[:, idx])).elements()
+                self.args.x0 += X_warmStart[:, idx+i].elements()
                 self.args.x0 += U_warmStart[:, idx+i].elements()
                 self.args.x0 += [0.0]*self.dyn.Nz
                 self.args.x0 += [0.0]*self.dyn.Nw
-            self.args.x0 += (np.array(x0)+(X_warmStart[:, (idx+self.TH)-1]-X_warmStart[:, idx])).elements()
+            # self.args.x0 += (np.array(x0)+(X_warmStart[:, (idx+self.TH)-1]-X_warmStart[:, idx])).elements()
+            self.args.x0 += X_warmStart[:, (idx+self.TH)-1].elements()
             print(len(self.args.x0))
         else:
             for i in range(self.TH-1):
-                self.args.x0 += (x0+(self.X_nom_val[:, idx+i]-X_warmStart[:, idx])).elements()
+                # self.args.x0 += (x0+(self.X_nom_val[:, idx+i]-X_warmStart[:, idx])).elements()
+                self.args.x0 += self.X_nom_val[:, idx+i].elements()
                 self.args.x0 += [0.0]*self.dyn.Nu
                 self.args.x0 += [0.0]*self.dyn.Nz
                 self.args.x0 += [0.0]*self.dyn.Nw
-            self.args.x0 += (x0+(self.X_nom_val[:, (idx+self.TH)-1]-X_warmStart[:, idx])).elements()
+            # self.args.x0 += (x0+(self.X_nom_val[:, (idx+self.TH)-1]-X_warmStart[:, idx])).elements()
+            self.args.x0 += self.X_nom_val[:, (idx+self.TH)-1].elements()
         for i in range(self.Nphases):
             self.args.x0 += self.dyn.s0
         # import pdb; pdb.set_trace()

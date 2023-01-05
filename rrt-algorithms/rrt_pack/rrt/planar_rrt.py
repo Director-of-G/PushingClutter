@@ -2,7 +2,7 @@ from rrt_pack.rrt.planar_rrt_base import PlanarRRTBase
 
 
 class PlanarRRT(PlanarRRTBase):
-    def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01):
+    def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01, pri=0.0):
         """
         Template RRT planner
         :param X: Search Space
@@ -12,8 +12,9 @@ class PlanarRRT(PlanarRRTBase):
         :param max_samples: max number of samples to take
         :param r: resolution of points to sample along edge when checking for collisions
         :param prc: probability of checking whether there is a solution
+        :param pri: probability of informed sampling (steer from current tree node)
         """
-        super().__init__(X, Q, x_init, x_goal, max_samples, r, prc)
+        super().__init__(X, Q, x_init, x_goal, max_samples, r, prc, pri)
         print('Using method {0}!'.format('PlanarRRT'))
 
     def rrt_search(self):

@@ -4,6 +4,8 @@
 from itertools import tee
 
 import numpy as np
+from shapely import Polygon
+from shapely import affinity, contains
 
 from rrt_pack.utilities.math import angle_clip, angle_limit
 
@@ -141,9 +143,62 @@ def sweep(start, goal, revol, q):
     return pts
 
 
+def gen_polygon(coord, geom):
+    """
+    Return the shapely.Polygon object of (x, y, theta)
+    :param poly: (x, y, theta) coordinates
+    :param beta: (xl, yl) geometry
+    :return: Polygon
+    """
+    x, y, theta = coord
+    xl, yl = geom
+    poly = Polygon([(0.5*xl, 0.5*yl), (-0.5*xl, 0.5*yl), (-0.5*xl, -0.5*yl), (0.5*xl, -0.5*yl), (0.5*xl, 0.5*yl)])
+    poly = affinity.rotate(poly, theta, origin='center', use_radians=True)
+    poly = affinity.translate(poly, x, y)
+    
+    return poly
+
+
+def random_place_rect(bound, geom, num, max_iter, obs):
+    """
+    Generate rectangles that do not overlap.
+    :param bound: search space (xmin, ymin, xmax, ymax)
+    :param geom: rectangle geometry (xl, yl)
+    :param num: expected rectangle num
+    :param max_iter: max iteration
+    :return: list of rectangles (x, y, theta) 
+    """
+    thmin, thmax = -np.pi, np.pi
+    xmin, ymin, xmax, ymax = bound
+    xl, yl = xmax - xmin, ymax - ymin
+    bound_poly = gen_polygon(coord=(xl/2, yl/2, 0.),
+                             geom=(xl, yl))
+    
+    # debug
+    debug_obs = []
+    
+    # create planar indexing
+    n_iters = 0
+    # obs = PlanarIndex()
+    while n_iters < max_iter and obs.obs_num < num:
+        print('--- iteration {0}, {1} samples valid ---'.format(n_iters, obs.obs_num))
+        # random sample
+        # import pdb; pdb.set_trace()
+        samp = np.random.uniform([xmin, ymin, thmin], [xmax, ymax, thmax])
+        samp_poly = gen_polygon(samp, geom)
+        if contains(bound_poly, samp_poly) and obs.count(samp, geom) == 0:
+            debug_obs.append(samp.tolist())
+            obs.append([samp.tolist()], [geom])
+        n_iters = n_iters + 1
+    
+    print('Finished! Total iterations:{0}.'.format(n_iters))
+    return debug_obs
+    
+
 class Revolute(object):
     def __init__(self, finite, x, y, theta) -> None:
         self.finite = finite  # False=trans(lation) only or True=revol(ution)
         self.x = x
         self.y = y
         self.theta = theta
+

@@ -8,7 +8,7 @@ from rrt_pack.rrt.planar_rrt import PlanarRRT
 
 
 class PlanarRRTStar(PlanarRRT):
-    def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01, rewire_count=None):
+    def __init__(self, X, Q, x_init, x_goal, max_samples, r, prc=0.01, pri=0.0, rewire_count=None):
         """
         RRT* Search
         :param X: Search Space
@@ -18,9 +18,10 @@ class PlanarRRTStar(PlanarRRT):
         :param max_samples: max number of samples to take
         :param r: resolution of points to sample along edge when checking for collisions
         :param prc: probability of checking whether there is a solution
+        :param pri: probability of informed sampling (steer from current tree node)
         :param rewire_count: number of nearby vertices to rewire
         """
-        super().__init__(X, Q, x_init, x_goal, max_samples, r, prc)
+        super().__init__(X, Q, x_init, x_goal, max_samples, r, prc, pri)
         self.rewire_count = rewire_count if rewire_count is not None else 0
         self.c_best = float('inf')  # length of best solution thus far
         print('Using method {0}!'.format('PlanarRRTStar'))
@@ -114,6 +115,8 @@ class PlanarRRTStar(PlanarRRT):
                 # rewire tree
                 # import pdb; pdb.set_trace()
                 self.rewire(0, x_new, L_near)
+            else:
+                self.connect_to_point(0, x_nearest, x_new)
 
             solution = self.check_solution()
             if solution[0]:
