@@ -2,7 +2,8 @@
 # Configuration file for tracking using sliding
 # 
 dynamics:
-    xLenght: 0.09 #  [meter]
+    # xLenght: 0.09 #  [meter]
+    xLenght: 0.07 #  [meter]
     yLenght: 0.12 #  [meter]
     pusherRadious: 0.01 #  [meter]
     pusherFricCoef: 0.3

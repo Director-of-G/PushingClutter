@@ -113,6 +113,24 @@ def get_contact_mode(beta, poseA, poseB):
     else:
         return "A_face_B_edge", yA1, yB0
     
+def get_obs_slider_states(x_a, dtheta, yA1, yB0, beta):
+    """
+    Get the pose of sliderB from contact configurations.
+    :param x_a: sliderA pose (ndarray)
+    :param dtheta: thetaB - thetaA (double)
+    :param yA1, yB0: contact configurations (double)
+    :param beta: slider geometry (list)
+    :return: x_b (list)
+    """
+    xl = beta[0]
+    x_b = np.zeros_like(x_a[:3])
+    x_b[2] = x_a[2] + dtheta
+    x_b[0:2] = x_a[0:2] + rotation_matrix2X2(x_a[2]) @ np.array([xl/2, yA1]) \
+                        - rotation_matrix2X2(x_b[2]) @ np.array([-xl/2, yB0])
+    x_b = x_b.tolist() + [yB0]
+                        
+    return x_b
+    
 def rotation_matrix2X2(theta):
     """
     Rotate anti-clockwise
@@ -430,7 +448,7 @@ class buildDoubleSliderSimObj():
                     self.db_dyn['A_face_B_edge'].animate,
                     fargs=(ax, X_A, X_B, X_ctact, beta),
                     frames=X_ctact.shape[1]-1,
-                    interval=self.dt*1000*5,  # microseconds
+                    interval=self.dt*1000*1,  # microseconds
                     blit=True,
                     repeat=False,
             )

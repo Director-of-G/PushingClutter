@@ -74,6 +74,9 @@ class buildOptObj():
         self.args.ubx = []
         self.args.lbg = []
         self.args.ubg = []
+        
+        # disturbance observer
+        self.d_hat = cs.SX.sym('d_hat', self.dyn.Nx)
 
         # set optimization variables
         self.X_nom = cs.SX.sym('X_nom', self.dyn.Nx, self.TH)
@@ -130,20 +133,20 @@ class buildOptObj():
             __u_bar = cs.SX.sym('u_bar', self.dyn.Nu)
             self.f_error = cs.Function(
                     'f_error',
-                    [__x_nom, __u_nom, __x_bar, __x_bar_next, __u_bar, self.dyn.beta],
-                    [__x_bar_next-__x_bar-dt*(cs.mtimes(__A_func(__x_nom, __u_nom, self.dyn.beta), __x_bar) + cs.mtimes(__B_func(__x_nom,__u_nom, self.dyn.beta),__u_bar))])
+                    [__x_nom, __u_nom, __x_bar, __x_bar_next, __u_bar, self.dyn.beta, self.d_hat],
+                    [__x_bar_next-__x_bar-dt*(cs.mtimes(__A_func(__x_nom, __u_nom, self.dyn.beta), __x_bar) + cs.mtimes(__B_func(__x_nom,__u_nom, self.dyn.beta),__u_bar) + self.d_hat)])
         else:
             __x_next = cs.SX.sym('__x_next', self.dyn.Nx)
             if not self.multiSliders:
                 self.f_error = cs.Function(
                         'f_error',
-                        [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta],
-                        [__x_next-self.dyn.x-dt*self.dyn.f(self.dyn.x,self.dyn.u,self.dyn.beta)])
+                        [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta, self.d_hat],
+                        [__x_next-self.dyn.x-dt*(self.dyn.f(self.dyn.x,self.dyn.u,self.dyn.beta)+self.d_hat)])
             else:
                 self.f_error = cs.Function(
                         'f_error',
-                        [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta],
-                        [__x_next[:4]-self.dyn.x[:4]-dt*self.dyn.f1(self.dyn.x,self.dyn.u,self.dyn.beta)])
+                        [self.dyn.x, self.dyn.u, __x_next, self.dyn.beta, self.d_hat],
+                        [__x_next[:4]-self.dyn.x[:4]-dt*(self.dyn.f1(self.dyn.x,self.dyn.u,self.dyn.beta)+self.d_hat)])
         # ---- Map dynamics constraint ----
         self.F_error = self.f_error.map(self.TH-1)
         # ---- Define Intrinsic constraints on state variables ----
@@ -274,12 +277,12 @@ class buildOptObj():
                     self.X_nom[:, :-1], self.U_nom,
                     self.X_bar[:, :-1], self.X_bar[:, 1:],
                     self.U_bar,
-                    self.dyn.beta).elements()
+                    self.dyn.beta, self.d_hat).elements()
         else:
             self.opt.g += self.F_error(
                     self.X[:, :-1], self.U, 
                     self.X[:, 1:],
-                    self.dyn.beta).elements()
+                    self.dyn.beta, self.d_hat).elements()
         self.args.lbg += [0.] * 4 * (self.TH-1)
         self.args.ubg += [0.] * 4 * (self.TH-1)
         # ---- State Intrinsic constraints ----
@@ -346,6 +349,7 @@ class buildOptObj():
         self.opt.p += self.dyn.beta.elements()
         self.opt.p += self.x0.elements()
         self.opt.p += self.X_nom.elements()
+        self.opt.p += self.d_hat.elements()
         if self.useGoalFlag:
             self.opt.p += self.X_goal_var.elements()
             self.opt.p += self.S_goal.elements()
@@ -406,7 +410,7 @@ class buildOptObj():
             self.solver = cs.qpsol('solver', self.solver_name, prob, opts_dict)
         #  -------------------------------------------------------------------
 
-    def solveProblem(self, idx, x0, beta,
+    def solveProblem(self, idx, x0, beta, d_hat,
                      X_warmStart=None, u_warmStart=None,
                      obsCentre=None, obsRadius=None, S_goal_val=None, X_goal_val=None):
         if self.numObs > 0:
@@ -419,6 +423,7 @@ class buildOptObj():
         print(beta)
         p_ += x0
         p_ += self.X_nom_val[:, idx:(idx+self.TH)].elements()
+        p_ += d_hat
         if self.useGoalFlag:
             if X_goal_val is None:
                 p_ += x0  # periodic trajectory, the start is the end

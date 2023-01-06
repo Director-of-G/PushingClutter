@@ -2,6 +2,7 @@
 
 import time
 
+from copy import deepcopy
 from matplotlib import pyplot as plt
 import numpy as np
 import casadi as cs
@@ -10,6 +11,12 @@ import sliding_pack
 
 
 class Double_Slider_lim_surf_test_dyn():
+    """
+    - Double sliders
+    - Face-to-edge contact
+    - Force input
+    - Only offer optimization interface (for NLP)
+    """
     def __init__(self, configDict) -> None:
         # init parameters
         # -----------------------
@@ -352,6 +359,196 @@ class Double_Slider_lim_surf_test_dyn():
         
         return resultFlag, x_opt, u_opt, s_opt, f_opt, t_opt
     
+    
+class Double_Slider_lim_surf_mini_dyn():
+    """
+    - Double sliders
+    - Face-to-edge contact
+    - Force input
+    - Only offer simulation interface (for LCP)
+    """
+    def __init__(self, configDict) -> None:
+        # init parameters
+        # -----------------------
+        try:
+            self.dt = configDict['timeInterval']
+        except:
+            self.dt = 0.04
+        self.miu = configDict['pusherFricCoef']
+        self.x_length = configDict['xLenght']
+        self.y_length = configDict['yLenght']
+        
+        # geometry and kinematics
+        # -----------------------
+        __xl = cs.SX.sym('__xl')  # slider x lenght
+        __yl = cs.SX.sym('__yl')  # slider y lenght
+        __r_pusher = cs.SX.sym('__r_pusher')  # radious of the cilindrical pusher
+        __beta = cs.veccat(__xl, __yl, __r_pusher)
+        __Area = __xl*__yl
+        __int_Area = sliding_pack.integral.rect_cs(__xl, __yl)
+        __c = __int_Area/__Area # ellipsoid approximation ratio
+        __A = cs.SX.sym('__A', cs.Sparsity.diag(3))
+        __A[0,0] = __A[1,1] = 1.; __A[2,2] = 1./(__c**2)
+        
+        __thetaA = cs.SX.sym('__thetaA')
+        __thetaB = cs.SX.sym('__thetaB')
+        __RA, __RB = cs.SX(3, 3), cs.SX(3, 3)
+        __cthetaA = cs.cos(__thetaA); __sthetaA = cs.sin(__thetaA)
+        __RA[0,0] = __cthetaA; __RA[0,1] = -__sthetaA; __RA[1,0] = __sthetaA; __RA[1,1] = __cthetaA; __RA[2,2] = 1.0
+        __cthetaB = cs.cos(__thetaB); __sthetaB = cs.sin(__thetaB)
+        __RB[0,0] = __cthetaB; __RB[0,1] = -__sthetaB; __RB[1,0] = __sthetaB; __RB[1,1] = __cthetaB; __RB[2,2] = 1.0
+        
+        __dtheta = cs.SX.sym('dtheta')
+        __TB2A, __TA2B = cs.SX(2, 2), cs.SX(2, 2)
+        __cdtheta = cs.cos(__dtheta); __sdtheta = cs.sin(__dtheta)
+        __TB2A[0,0] = __cdtheta; __TB2A[0,1] = -__sdtheta; __TB2A[1,0] = __sdtheta; __TB2A[1,1] = __cdtheta
+        __TA2B[0,0] = __cdtheta; __TA2B[0,1] = __sdtheta; __TA2B[1,0] = -__sdtheta; __TA2B[1,1] = __cdtheta
+        
+        # variables
+        # -----------------------
+        # contact force
+        __fnA = cs.SX.sym('fnA')
+        __ftA = cs.SX.sym('ftA')
+        __fnB = cs.SX.sym('fnB')
+        __ftB = cs.SX.sym('ftB')
+        __f_ctact = cs.vertcat(__fnA, __ftA, __fnB, __ftB)
+        
+        # contact location
+        __yctA = cs.SX.sym('yctA')
+        __yctB = cs.SX.sym('yctB')
+        __y_ctact = cs.vertcat(__yctA, __yctB)
+        
+        # contact location velocity
+        __dpsiC = cs.SX.sym('dpsiC')
+        
+        __JA0, __JA1, __JB0 = cs.SX(2, 3), cs.SX(2, 3), cs.SX(2, 3)
+        __JA0[0, 0] = 1; __JA0[1, 1] = 1; __JA0[0, 2] = -__yctA; __JA0[1, 2] = -0.5*self.x_length
+        __JA1[0, 0] = 1; __JA1[1, 1] = 1; __JA1[0, 2] = 0.5*self.y_length; __JA1[1, 2] = 0.5*self.x_length
+        __JB0[0, 0] = 1; __JB0[1, 1] = 1; __JB0[0, 2] = -__yctB; __JB0[1, 2] = -0.5*self.x_length
+        
+        # normal vectors ('-x' face of slider B)
+        __n = np.array([[1.], [0.]])
+        __D = np.array([[0,  0],
+                        [1, -1]])
+        
+        __VB = cs.mtimes(__A, cs.mtimes(__JB0.T, __f_ctact[2:4]))
+        __VA = cs.mtimes(__A, cs.mtimes(__JA0.T, __f_ctact[0:2]) + cs.mtimes(__JA1.T, -cs.mtimes(__TB2A, __f_ctact[2:4])))
+
+        __vctact = cs.mtimes(__TA2B, cs.mtimes(__JA1, __VA)) - cs.mtimes(__JB0, __VB)
+        
+        # lcp definitions
+        __M = cs.SX(4, 4)
+        __M[0, 0] = cs.mtimes(__n.T, 
+                              cs.mtimes(__JB0, cs.mtimes(__A, cs.mtimes(__JB0.T, __n))) +
+                              cs.mtimes(__TA2B, cs.mtimes(__JA1, cs.mtimes(__A, cs.mtimes(__JA1.T, cs.mtimes(__TB2A, __n))))))
+        __M[0, 1:3] = cs.mtimes(__n.T, 
+                                cs.mtimes(__JB0, cs.mtimes(__A, cs.mtimes(__JB0.T, __D))) +
+                                cs.mtimes(__TA2B, cs.mtimes(__JA1, cs.mtimes(__A, cs.mtimes(__JA1.T, cs.mtimes(__TB2A, __D))))))
+        __M[0, 3] = 0.
+        __M[1:3, 0] = cs.mtimes(__D.T, 
+                                cs.mtimes(__JB0, cs.mtimes(__A, cs.mtimes(__JB0.T, __n))) +
+                                cs.mtimes(__TA2B, cs.mtimes(__JA1, cs.mtimes(__A, cs.mtimes(__JA1.T, cs.mtimes(__TB2A, __n))))))
+        __M[1:3, 1:3] = cs.mtimes(__D.T, 
+                                  cs.mtimes(__JB0, cs.mtimes(__A, cs.mtimes(__JB0.T, __D))) +
+                                  cs.mtimes(__TA2B, cs.mtimes(__JA1, cs.mtimes(__A, cs.mtimes(__JA1.T, cs.mtimes(__TB2A, __D))))))
+        __M[1:3, 3] = np.ones((2, 1))
+        __M[3, :] = np.array([self.miu, -1, -1, 0.])
+        
+        __q = cs.SX(4, 1)
+        __q[0, :] = cs.mtimes(__n.T,
+                              -cs.mtimes(__TA2B, cs.mtimes(__JA1, cs.mtimes(__A, cs.mtimes(__JA0.T, __f_ctact[0:2])))))
+        __q[1:3, :] = cs.mtimes(__D.T,
+                                -cs.mtimes(__TA2B, cs.mtimes(__JA1, cs.mtimes(__A, cs.mtimes(__JA0.T, __f_ctact[0:2])))))
+        __q[3, :] = 0.
+        
+        # lcp interfaces
+        self.x = cs.SX.sym('x', 8)  # (x_a *3, yc_a, x_b *3, yc_b)
+        self.u = cs.SX.sym('u', 6)  # (fnA, ftA, fnB, ftB, dphic+, dphic-)
+        self.beta = cs.SX.sym('b', 3)  # (xl, yl, rl)
+        
+        M_ = cs.Function('M_', [__dtheta, __y_ctact, __f_ctact[0:2], __beta], [__M], ['dt', 'yc', 'fc', 'b'], ['M'])
+        self.M = cs.Function('M', [self.x, cs.vertcat(self.u[0:2],self.u[4:6]), self.beta], [M_((self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), self.u[0:2], self.beta)])
+        
+        q_ = cs.Function('q_', [__dtheta, __y_ctact, __f_ctact[0:2], __beta], [__q], ['dt', 'yc', 'fc', 'b'], ['q'])
+        self.q = cs.Function('q', [self.x, cs.vertcat(self.u[0:2],self.u[4:6]), self.beta], [q_((self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), self.u[0:2], self.beta)])
+        
+        # dynamic equations
+        __x_init = cs.SX.sym('x_init', 8)
+        __x_new = cs.SX.sym('x_new', 8)
+        __xA_new = __x_init[0:3] + cs.mtimes(__RA, __VA) * self.dt
+        
+        __yctB_new = __x_init[7] + __vctact[1] * self.dt
+        
+        __psiC = cs.arctan(-__x_init[3]/(__beta[0]/2))
+        __psiC_new = __psiC + __dpsiC * self.dt
+        
+        __x_new[0:3] = __xA_new
+        __x_new[3] = -(__beta[0]/2) * cs.tan(__psiC_new)
+        __x_new[6] = __x_init[6] + __VB[2] * self.dt
+        __x_new[4:6] = __xA_new[0:2] + cs.mtimes(__RA[0:2, 0:2], cs.vertcat(0.5*self.x_length, -0.5*self.y_length)) + cs.mtimes(__RB[0:2, 0:2], -cs.vertcat(-0.5*self.x_length, __yctB_new))
+        __x_new[7] = __yctB_new
+        
+        f_ = cs.Function('f', [__x_init, __thetaA, __thetaB, __dtheta, __y_ctact, __dpsiC, __f_ctact, __beta],
+                          [__x_new],
+                          ['x_i', 'tA', 'tB', 'dt', 'yc', 'dp', 'fc', 'b'],
+                          ['x_n'])
+        
+        self.f = cs.Function('f', [self.x, self.u, self.beta],
+                             [f_(self.x, self.x[2], self.x[6], (self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), (self.u[4]-self.u[5]), self.u[0:4], self.beta)])
+    
+        # real disturbances
+        __d_real = cs.mtimes(__RA, cs.mtimes(__A, cs.mtimes(__JA1.T, -cs.mtimes(__TB2A, __f_ctact[2:4]))))
+        d_real_ = cs.Function('d', [__thetaA, __dtheta, __y_ctact, __f_ctact, __beta], [cs.vertcat(__d_real, 0.)], ['ta', 'dt', 'yc', 'fc', 'b'], ['d'])
+        self.d_real = cs.Function('f', [self.x, self.u, self.beta],
+                                  [d_real_(self.x[2], (self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), self.u[0:4], self.beta)])
+    
+    def solveLCP(self, x0, u0, beta):
+        """
+        :param x0: (x_a *3, PSI_C, x_b *3, yc_b), state variables
+        :param u0: (fnA, ftA, dphic+, dphic-), input variables
+        :param beta: (xl, yl, rl), slider geometry
+        :return: contact force
+        """
+        # convert PSI_C to yA0
+        x0 = deepcopy(x0)
+        psi_c = x0[3]
+        yA0 = -0.5*beta[0]*np.tan(psi_c)
+        x0[3] = yA0
+        
+        M = self.M(x0, u0, beta)
+        q = self.q(x0, u0, beta)
+        
+        # solve with qpoases
+        qp = {}
+        qp['h'] = (2*M).sparsity()
+        qp['a'] = M.sparsity()
+        S = cs.conic('LCP2QP', 'qpoases', qp)
+
+        r = S(h=2*M, g=q, a=M, lba=-q, lbx=0.)
+        u = r['x'].elements()  # (fnB, ftB+, ftB-)
+        u = [u[0], u[1]-u[2]]
+        
+        return u
+    
+    def updateStates(self, x0, u0, beta):
+        """
+        :param x0: (x_a *3, PSI_C, x_b *3, yc_b), state variables
+        :param u0: (fnA, ftA, fnB, ftB, dphic+, dphic-), input variables
+        :param beta: (xl, yl, rl), slider geometry
+        :return: updated state variables
+        """
+        # convert PSI_C to yA0
+        x0 = deepcopy(x0)
+        psi_c = x0[3]
+        yA0 = -0.5*beta[0]*np.tan(psi_c)
+        x0[3] = yA0
+        # update
+        x_new = self.f(x0, u0, beta)
+        x_new = x_new.elements()
+        # convert ya0 to PSI_C
+        x_new[3] = np.arctan(-x_new[3]/(beta[0]/2))
+        
+        return x_new
     
 if __name__ == '__main__':
     config = sliding_pack.load_config('tracking_config_2sliders.yaml')

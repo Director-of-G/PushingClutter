@@ -82,7 +82,7 @@ def compute_nomState_from_nomTraj(x_data, y_data, dt, beta=None, phi_r=0., multi
         c, s = np.cos(theta), np.sin(theta)
         R = np.array(((c, s), (-s, c)))
         Dx_new = R.dot(np.array((Dx0_nom[i],Dx1_nom[i])))
-        print(Dx_new)
+        # print(Dx_new)
         theta += np.arctan2(Dx_new[1], Dx_new[0])
         x2_nom[i] = theta
     x2_nom = np.append(x2_nom, x2_nom[-1])
