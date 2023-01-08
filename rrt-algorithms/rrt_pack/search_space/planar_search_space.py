@@ -5,7 +5,7 @@ import numpy as np
 from rtree import index
 import random
 
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, LineString
 from shapely.ops import nearest_points
 
 from rrt_pack.utilities.math import angle_limit, angle_diff
@@ -13,6 +13,7 @@ from rrt_pack.utilities.geometry import es_points_along_line, es_points_along_ar
 from rrt_pack.utilities.obstacle_generation import obstacle_generator
 
 from rrt_pack.search_space.planar_index import PlanarIndex
+from rrt_pack.utilities.sampling import WeightedSampler
 
 
 DEFAULT_GEOM = [0.07, 0.12]
@@ -61,6 +62,8 @@ class PlanarSearchSpace(object):
                 raise Exception("Obstacle start must be less than obstacle end")
             self.obs = index.Index(obstacle_generator(O), interleaved=True, properties=p)
             
+        self.sampler = WeightedSampler()
+            
     def create_slider_geometry(self, geom):
         self.geom = geom  # slider's geometric boundary
         self.slider_relcoords = np.array([[ geom[0], geom[1]],  # quad I
@@ -100,6 +103,16 @@ class PlanarSearchSpace(object):
             if self.obstacle_free(x):
                 return x
             
+    def sample_free_2d(self):
+        """
+        Sample a 2d location within X_free
+        :return: random 2d location within X_free
+        """
+        while True:  # sample until not inside of an obstacle
+            x = self.sample_2d()
+            if self.obstacle_free_base(x):
+                return x
+            
     def sample_collision(self):
         """
         Sample a location outside X_free
@@ -132,6 +145,33 @@ class PlanarSearchSpace(object):
                 return False
                 
         return True
+    
+    def collision_free_2d(self, x, y):
+        """
+        Return true if the LineString connecting x and y is collision free.
+        :param xm y: two 2d positions
+        :return: collision free or not
+        """
+        line = LineString([x, y])
+        return (self.obs.count(line) == 0)
+    
+    def check_in_range_2d(self, x):
+        """
+        Return true if x is in the range of X_dimensions
+        :param x: 2d position
+        :return: in range or not
+        """
+        xmin, xmax = self.X_dimensions[0]
+        ymin, ymax = self.X_dimensions[1]
+        return (xmin <= x[0] <= xmax) and (ymin <= x[1] <= ymax)
+    
+    def radius_search(self, x):
+        """
+        Compute the maximum obstacle-free distance from x
+        :param x: the query 2d point
+        :return: the maximum obstacle-free distance
+        """
+        return self.obs.nearest_dist(x)
     
     def flatness_free(self, start, end):
         """
@@ -265,22 +305,34 @@ class PlanarSearchSpace(object):
         Return a random location within X
         :return: random location within X (not necessarily X_free)
         """
-        rand = random.random()
-        # if rand < 0.15:
-        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.4*np.pi], 
-        #                           np.r_[self.dimension_lengths[:2, 1], 0.6*np.pi])
-        # elif 0.15 <= rand < 0.30:
-        if rand < 0.60:
-            x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], -0.6*np.pi], 
-                                  np.r_[self.dimension_lengths[:2, 1], -0.4*np.pi])
-        # elif 0.30 <= rand < 0.45:
-        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], -0.1*np.pi], 
-        #                           np.r_[self.dimension_lengths[:2, 1], 0.1*np.pi])
-        # elif 0.45 <= rand < 0.60:
-        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.9*np.pi], 
-        #                           np.r_[self.dimension_lengths[:2, 1], 1.1*np.pi])
-        else:
-            x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
+        # rand = random.random()
+        # # if rand < 0.15:
+        # #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.4*np.pi], 
+        # #                           np.r_[self.dimension_lengths[:2, 1], 0.6*np.pi])
+        # # elif 0.15 <= rand < 0.30:
+        # if rand < 0.60:
+        #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], -0.6*np.pi], 
+        #                           np.r_[self.dimension_lengths[:2, 1], -0.4*np.pi])
+        # # elif 0.30 <= rand < 0.45:
+        # #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], -0.1*np.pi], 
+        # #                           np.r_[self.dimension_lengths[:2, 1], 0.1*np.pi])
+        # # elif 0.45 <= rand < 0.60:
+        # #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.9*np.pi], 
+        # #                           np.r_[self.dimension_lengths[:2, 1], 1.1*np.pi])
+        # else:
+        #    x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
+        
+        x = self.sampler.sample(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
+        
+        return tuple(x)
+    
+    def sample_2d(self):
+        """
+        Return a random 2d location within X
+        :return: random 2d location (x, y) within (not necessarily X_free)
+        """
+        x = np.random.uniform(self.dimension_lengths[0:2, 0], self.dimension_lengths[0:2, 1])
+        
         return tuple(x)
 
 

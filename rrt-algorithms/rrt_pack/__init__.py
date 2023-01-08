@@ -53,3 +53,5 @@ from rrt_pack.utilities import math
 
 from rrt_pack.utilities import data_proc as data
 
+from rrt_pack.utilities import sampling as samp
+

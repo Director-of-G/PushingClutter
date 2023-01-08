@@ -110,18 +110,19 @@ class PlanarPlot(object):
         """
         plot_polygon(self.X.obs.obs_conv_hull, ax=ax, add_points=False, color='lightgreen', alpha=0.3)
     
-    def plot_debug(self, samples):
+    def plot_debug(self, samples, delay_show=False):
         """
         Plot sampled poses.
         :param samples: array of (x, y, theta)
+        :param delay_show: if true, won't call plt.show() and return plt.ax
         """
         fig = plt.figure()
         ax = fig.add_subplot(111)
-        for i in range(len(self.obstacles)):
-            coord = self.obstacles[i]
-            ptr_set, arrow = self.plot_slider(coord)
-            ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
-            ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='red')
+        # for i in range(len(self.obstacles)):
+        #     coord = self.obstacles[i]
+        #     ptr_set, arrow = self.plot_slider(coord)
+        #     ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
+        #     ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='red')
         for i in range(len(samples)):
             coord = samples[i]
             ptr_set, arrow = self.plot_slider(coord)
@@ -130,7 +131,10 @@ class PlanarPlot(object):
         plt.xlim([0.0, 0.5])
         plt.ylim([0.0, 0.5])
         plt.gca().set_aspect('equal')
-        plt.show()
+        if not delay_show:
+            plt.show()
+        else:
+            return ax
     
     def plot_rrt_result(self, scatter=False):
         """
@@ -438,8 +442,16 @@ if __name__ == '__main__':
     X = PlanarSearchSpace(X_dimensions, Obstacles)
     X.create_slider_geometry(geom=slider_geom)
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
+    
+    from rrt_pack.utilities.sampling import WeightedSampler
+    sampler = WeightedSampler()
+    samples = []
+    for i in range(200):
+        sample = sampler.sample(X_dimensions[:, 0], X_dimensions[:, 1])
+        samples.append(sample.tolist())
     plot = PlanarPlot(filename='rrt_planar_pushing',
                       X=X)
+    plot.plot_debug(samples)
     
     # plot 2d visualization
     # plot.load_result_file()
@@ -453,7 +465,7 @@ if __name__ == '__main__':
     # plot.plot_pointcloud(plot_col=False, plot_free=True)
     # plot.draw(auto_open=True)
     
-    samples = np.load('../../output/data/rrt_planar_pushing_samples.npy')
-    obstacles = np.load('../../output/data/rrt_planar_pushing_obstacles.npy')
-    plot.obstacles = obstacles
-    plot.plot_debug(samples)
+    # samples = np.load('../../output/data/rrt_planar_pushing_samples.npy')
+    # obstacles = np.load('../../output/data/rrt_planar_pushing_obstacles.npy')
+    # plot.obstacles = obstacles
+    # plot.plot_debug(samples)

@@ -25,14 +25,13 @@ class Method(Enum):
 
 parser = argparse.ArgumentParser()
 parser.add_argument('-sf', '--save_file', action='store_true', default=True, help='save the planning result to pickle file')
-parser.add_argument('-pf', '--plot_figure', action='store_true', default=True, help='plot fdata in figures')
+parser.add_argument('-pf', '--plot_figure', action='store_true', default=True, help='plot data in figures')
 parser.add_argument('-m', '--method', type=Method, choices=list(Method), help='planning method', required=True)
 args = parser.parse_args()
 
 
 save_file = args.save_file
 plot_figure = args.plot_figure
-
 
 X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
 
@@ -71,11 +70,11 @@ X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
 # x_goal = (0.405, 0.425, np.pi / 2)  # goal location
 
 # object retrieval from clutter
-O_file = '../../rrt_pack/search_space/data/debug_obs3.npy'
-O_index = 0
+O_file = '../../rrt_pack/search_space/data/debug_obs6.npy'
+O_index = 3
 Obstacles = np.load(O_file)
 x_init = tuple(Obstacles[O_index, :])  # starting location
-x_goal = (0.35, 0.48, 0.)  # goal location
+x_goal = (0.484, 0.329, -0.5*np.pi)  # goal location
 
 
 slider_geom = [0.07, 0.12]
@@ -84,7 +83,7 @@ Q = np.arange(0.1, 1.1, 0.1)  # length of tree edges
 r = 0.001  # length of smallest edge to check for intersection with obstacles
 max_samples = 1024  # max number of samples to take before timing out
 prc = 0.1  # probability of checking for a connection to goal
-pri = 0.2 # probability of generating new vertex from current vertex
+pri = 0.0 # probability of generating new vertex from current vertex
 
 rewire_count = 32  # optional, number of nearby branches to rewire
 
