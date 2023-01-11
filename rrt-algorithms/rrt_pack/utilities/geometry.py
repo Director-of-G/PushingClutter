@@ -146,7 +146,7 @@ def sweep(start, goal, revol, q):
 def gen_polygon(coord, geom):
     """
     Return the shapely.Polygon object of (x, y, theta)
-    :param poly: (x, y, theta) coordinates
+    :param coord: (x, y, theta) coordinates
     :param beta: (xl, yl) geometry
     :return: Polygon
     """
@@ -157,6 +157,17 @@ def gen_polygon(coord, geom):
     poly = affinity.translate(poly, x, y)
     
     return poly
+
+
+def centering_polygon(poly:Polygon):
+    """
+    Move the polygon's center to origin
+    :param poly: the input polygon
+    :return: xoff, yoff
+    """
+    xoff = poly.centroid.xy[0][0]
+    yoff = poly.centroid.xy[1][0]
+    return affinity.translate(poly, -xoff, -yoff), xoff, yoff
 
 
 def random_place_rect(bound, geom, num, max_iter, obs):

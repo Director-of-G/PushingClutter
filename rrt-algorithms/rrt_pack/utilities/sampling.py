@@ -8,9 +8,9 @@ from rrt_pack.utilities.geometry import planar_dist_between_points
 
 class WeightedSampler(object):
     def __init__(self) -> None:
-        self.central_path = np.load('../../rrt_pack/search_space/data/central_path.npy')
-        self.gauss_weight = np.array([1.0, 1.0, 0.0695*100])
-        # self.gauss_weight = np.array([1.0, 1.0, 0.])
+        self.central_path = np.load('../../rrt_pack/search_space/data/central_path2.npy')
+        # self.gauss_weight = np.array([1.0, 1.0, 0.0695*100])
+        self.gauss_weight = np.array([1.0, 1.0, 0.])
         self.sigma = 0.15
     def sample(self, lower, upper):
         while True:

@@ -228,8 +228,9 @@ class PlanarRRGBase(object):
 
 if __name__ == '__main__':
     X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
-    O_file = '../search_space/data/debug_obs6.npy'
-    O_index = 3
+    O_file = '../search_space/data/debug_obs8.npy'
+    O_index = 2
+    N_downsample = 200  # the number of downsampled route points
     Obstacles = np.load(O_file)
     rmin = 0.07 / 2
     vmin = 0.5 * 0.12 * 0.07
@@ -237,7 +238,7 @@ if __name__ == '__main__':
     x_init = tuple(Obstacles[O_index, 0:2])  # starting location
     X = PlanarSearchSpace(X_dimensions, O=None, O_file=O_file, O_index=O_index)
     X.create_slider_geometry(geom=[0.07, 0.12])
-    rrg = PlanarRRGBase(X=X, x_init=x_init, rmin=rmin, vmin=vmin, nmax=200, p_rej=0.9, knn=3, npath=1)
+    rrg = PlanarRRGBase(X=X, x_init=x_init, rmin=rmin, vmin=vmin, nmax=200, p_rej=0.9, knn=3, npath=10)
     
     rrg.rrg_build()
     
@@ -259,12 +260,27 @@ if __name__ == '__main__':
         ax.add_artist(plt.Circle(c, r, fill=False, alpha=0.2))
     
     # plot shortest paths on RRG
+    route_coords = []
     for x_target_idx, (dist, route_node_list) in paths.items():
         x_nodes = []
         for node_idx in route_node_list:
             x_nodes.append(rrg.G.nodes[node_idx]['c'])
         x_nodes = np.array(x_nodes)
-        plt.plot(x_nodes[:, 0], x_nodes[:, 1], marker='o', markersize=2, linestyle='-')
+        # plt.plot(x_nodes[:, 0], x_nodes[:, 1], marker='o', markersize=2, linestyle='-')
+        
+        # get the interpolated positions on path
+        path_coords = []
+        route_line = LineString(x_nodes)
+        for l in np.linspace(0, route_line.length, N_downsample):
+            xy = route_line.interpolate(l).coords.xy
+            path_coords.append([xy[0][0], xy[1][0]])
+        path_coords = np.array(path_coords)
+        path_coords = np.c_[path_coords, np.zeros(N_downsample,)]
+        # if x_target_idx == list(paths.keys())[0]:
+        #     np.save('../search_space/data/central_path3.npy', route_coords) 
+        plt.plot(path_coords[:, 0], path_coords[:, 1])
+        route_coords += path_coords.tolist()
+    np.save('../search_space/data/central_path3.npy', np.array(route_coords)) 
         
     plt.show()
     

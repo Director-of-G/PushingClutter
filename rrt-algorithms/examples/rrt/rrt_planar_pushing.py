@@ -4,6 +4,7 @@ import numpy as np
 
 import argparse
 from enum import Enum
+from matplotlib import pyplot as plt
 import pickle
 import sys
 sys.path.append('../../')
@@ -70,18 +71,18 @@ X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
 # x_goal = (0.405, 0.425, np.pi / 2)  # goal location
 
 # object retrieval from clutter
-O_file = '../../rrt_pack/search_space/data/debug_obs6.npy'
-O_index = 3
+O_file = '../../rrt_pack/search_space/data/debug_obs8.npy'
+O_index = 2
 Obstacles = np.load(O_file)
 x_init = tuple(Obstacles[O_index, :])  # starting location
-x_goal = (0.484, 0.329, -0.5*np.pi)  # goal location
+x_goal = (0.02, 0.22, 0.4*np.pi)  # goal location
 
 
 slider_geom = [0.07, 0.12]
 
 Q = np.arange(0.1, 1.1, 0.1)  # length of tree edges
 r = 0.001  # length of smallest edge to check for intersection with obstacles
-max_samples = 1024  # max number of samples to take before timing out
+max_samples = 2048  # max number of samples to take before timing out
 prc = 0.1  # probability of checking for a connection to goal
 pri = 0.0 # probability of generating new vertex from current vertex
 
@@ -149,12 +150,19 @@ if plot_figure:
        
        import pdb; pdb.set_trace()
        
-       np.save('../../output/data/rrt_planar_pushing_samples.npy', np.array(list(rrt.trees[0].E.keys())))
+       rrt_samples = np.array(list(rrt.trees[0].E.keys()))
+       np.save('../../output/data/rrt_planar_pushing_samples.npy', rrt_samples)
        np.save('../../output/data/rrt_planar_pushing_obstacles.npy', Obstacles)
        
        # plot 2d visualization
-       plot.load_result_file(data=dic)
-       plot.plot_rrt_result(scatter=True)
+       try:
+              plot.load_result_file(data=dic)
+              plot.plot_rrt_result(scatter=True)
+       except:
+              plt.clf()
+       
+       # plot rrt samples
+       plot.plot_debug(rrt_samples)
        
        import pdb; pdb.set_trace()
 

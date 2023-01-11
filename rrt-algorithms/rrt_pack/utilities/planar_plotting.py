@@ -25,15 +25,16 @@ def plot_obstacles(ax, Obstacles):
         ax.add_patch(rect)
 
 class PlanarPlot(object):
-    def __init__(self, filename, X):
+    def __init__(self, filename=None, X=None):
         """
         Create a plot
         :param filename: filename
         """
-        self.filename = "../../output/data/" + filename + ".pkl"
-        self.htmlname = "../../output/visualizations/" + filename + ".html"
-        self.obscloud_filename = "../../output/data/X_collision_F_letter.npy"  # sampled point cloud that represent X_collision
-        self.freecloud_filename = "../../output/data/X_free_F_letter.npy"  # sampled point cloud that represent X_free
+        if filename is not None:
+            self.filename = "../../output/data/" + filename + ".pkl"
+            self.htmlname = "../../output/visualizations/" + filename + ".html"
+            self.obscloud_filename = "../../output/data/X_collision_F_letter.npy"  # sampled point cloud that represent X_collision
+            self.freecloud_filename = "../../output/data/X_free_F_letter.npy"  # sampled point cloud that represent X_free
         self.obstacles = None
         self.path = None
         self.tree = None
@@ -128,8 +129,8 @@ class PlanarPlot(object):
             ptr_set, arrow = self.plot_slider(coord)
             ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
             ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='blue')
-        plt.xlim([0.0, 0.5])
-        plt.ylim([0.0, 0.5])
+        plt.xlim(self.X_dimensions[0])
+        plt.ylim(self.X_dimensions[1])
         plt.gca().set_aspect('equal')
         if not delay_show:
             plt.show()

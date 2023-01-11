@@ -10,26 +10,38 @@ from shapely.ops import nearest_points
 from rrt_pack.utilities.geometry import gen_polygon
 
 
-"""
-PlanarIndex is a partial extension of RTree.
-PlanarIndex provides polygon intersection, point containment detection based on Polygon.
-"""
 class PlanarIndex(object):
-    def __init__(self, O=None, shape=None) -> None:
+    """
+    PlanarIndex is a partial extension of RTree.
+    PlanarIndex provides polygon intersection, point containment detection based on Polygon.
+    """
+    def __init__(self, dimension_lengths, O=None, shape=None, Obj=None, Obj_shape=None) -> None:
         """
         Initialize Planar Indexing
+        :param dimension_lengths: range of each dimension
         :param O: list of tuple(x, y, theta), the location of obstacles
         :param shape: list of (xl, yl), the geometry of obstacles
+        :param Obj: tuple(x, y, theta), the tuple of object
+        :param Obj_shape: (xl, yl), the geometry of object
         """
+        self.X_dimensions = dimension_lengths
         if not (O is None and shape is None) and (len(O) != len(shape)):
             raise Exception("The size of obstacle should be compatible with their shape")
-        self.obs_num = len(O) if O is not None else 0
+        self.obs_num = 0
         self.obs = []
+        self.obj = gen_polygon(Obj, Obj_shape)
+        self.obj_theta0 = Obj[2]  # the initial theta value
+        self.obj_shape = Obj_shape  # default geometry
         
         # initialize all polygons
         if O is not None and shape is not None:
             self.append(O, shape)
             self.obs_conv_hull = self.calc_convex_hull()
+            
+        # initialize the arena
+        xmin, xmax = self.X_dimensions[0]
+        ymin, ymax = self.X_dimensions[1]
+        self.arena = Polygon([(xmax, ymax), (xmin, ymax), (xmin, ymin), (xmax, ymin), (xmax, ymax)])
             
     def append(self, O, shape):
         """
@@ -46,7 +58,8 @@ class PlanarIndex(object):
         """
         Return the number of polygons in intersection with point x
         :param x: point (x, y) or polygon(x, y, theta)
-        :return: number of polygons
+        :param shape: slider geometry (xl, yl, rl)
+        :return: number of polygons in collision with x
         """
         # basic shape
         if type(x) in [Point, LineString, Polygon]:
@@ -61,6 +74,18 @@ class PlanarIndex(object):
                 coord, geom = x, shape
                 polygon = gen_polygon(coord, geom)
                 return sum([not (poly.intersection(polygon).is_empty) for poly in self.obs])
+            
+    def translation_collision_free(self, pose1, pose2, shape):
+        """
+        Return true is the translation only movement between pose1 and pose2 are collision free
+        Return false otherwise
+        :param pose1: pose1
+        :param pose2: pose2
+        :param shape: slider geometry (xl, yl, rl)
+        :return: true of false
+        """
+        poly1, poly2 = gen_polygon(pose1, shape), gen_polygon(pose2, shape)
+        return self.count(MultiPolygon([poly1, poly2]).convex_hull) == 0
         
     def calc_convex_hull(self):
         """
@@ -94,14 +119,14 @@ if __name__ == '__main__':
     
     # debug_obs = random_place_rect(bound=[0.0, 0.0, xlim, ylim],
     #                               geom=geom,
-    #                               num=8,
+    #                               num=9,
     #                               max_iter=5000,
     #                               obs=PlanarIndex())
-    
-    debug_obs = np.load('./data/debug_obs.npy')
+    X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
+    debug_obs = np.load('./data/debug_obs8.npy')
     debug_shape = [[0.07, 0.12] for i in range(len(debug_obs))]
     
-    debug_index = PlanarIndex(debug_obs, debug_shape)
+    debug_index = PlanarIndex(X_dimensions, debug_obs, debug_shape, debug_obs[2, :], debug_shape[2])
     conv_hull = debug_index.calc_convex_hull()
     import pdb; pdb.set_trace()
     

@@ -24,6 +24,8 @@ class PlanarSearchSpace(object):
         Initialize Search Space
         :param dimension_lengths: range of each dimension
         :param O: list of obstacles
+        :param O_file: the file containing obstacle and object configurations
+        :param O_index: the object index
         """
         # slider geometry
         self.geom = None
@@ -47,9 +49,11 @@ class PlanarSearchSpace(object):
             # self.obs = index.Index(interleaved=True, properties=p)
             self.goal_mode = 'alterable'
             O = np.load(O_file)
+            Obj = O[O_index, :]
             O = np.delete(O, O_index, axis=0)  # delete the pushed object
             shape = [DEFAULT_GEOM for i in range(len(O))]
-            self.obs = PlanarIndex(O, shape)
+            Obj_shape = DEFAULT_GEOM
+            self.obs = PlanarIndex(dimension_lengths, O, shape, Obj, Obj_shape)
         else:
             # r-tree representation of obstacles
             self.goal_mode = 'invariant'
@@ -149,7 +153,7 @@ class PlanarSearchSpace(object):
     def collision_free_2d(self, x, y):
         """
         Return true if the LineString connecting x and y is collision free.
-        :param xm y: two 2d positions
+        :param x y: two 2d positions
         :return: collision free or not
         """
         line = LineString([x, y])
@@ -281,7 +285,7 @@ class PlanarSearchSpace(object):
         # if we know the revolution (COR, angle) between 'start' and 'end',
         # we return an extra pair of points, which is the nearest point between
         # COR and the 'start', 'end' poses
-        if revol is not None:
+        if revol.finite:
             start_pts = np.concatenate((pt_set1, np.expand_dims(pt_set1[:, 0], axis=1)), axis=1).T
             end_pts = np.concatenate((pt_set2, np.expand_dims(pt_set2[:, 0], axis=1)), axis=1).T
             cor_pt = Point(revol.x, revol.y)
@@ -496,6 +500,7 @@ if __name__ == '__main__':
     """
     
     # sample poses in X_collision
+    """
     sample_num = 8000
     collision_pts = []
     for i in range(sample_num):
@@ -509,3 +514,8 @@ if __name__ == '__main__':
         sample = X.sample_free()
         free_pts.append(sample)
     np.save('../../output/data/X_free_F_letter.npy', free_pts)
+    """
+    revol = X.pose2steer(start=(0.1214, 0.6542, 0.424*np.pi), end=(0.4126, 0.1467, 0.424*np.pi))
+    point_pairs = X.point_pairs(start=(0.1214, 0.6542, 0.424*np.pi), end=(0.4126, 0.1467, 0.424*np.pi), revol=revol)
+    import pdb; pdb.set_trace()
+    X.collision_free((0.468, 0.193, -2.25263043), (0.551, 0.193, -2.25263043), r=0.001)

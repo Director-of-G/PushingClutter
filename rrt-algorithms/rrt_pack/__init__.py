@@ -55,3 +55,8 @@ from rrt_pack.utilities import data_proc as data
 
 from rrt_pack.utilities import sampling as samp
 
+# ----------------------------------------------------------------
+# import from planning folder
+# ----------------------------------------------------------------
+
+from rrt_pack.planning import minkowski_sum as mksum
