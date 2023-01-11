@@ -392,9 +392,10 @@ class Double_Slider_lim_surf_mini_dyn():
         
         __thetaA = cs.SX.sym('__thetaA')
         __thetaB = cs.SX.sym('__thetaB')
-        __RA, __RB = cs.SX(3, 3), cs.SX(3, 3)
+        __RA, __RB, __Rg = cs.SX(3, 3), cs.SX(3, 3), cs.SX(4,3)
         __cthetaA = cs.cos(__thetaA); __sthetaA = cs.sin(__thetaA)
         __RA[0,0] = __cthetaA; __RA[0,1] = -__sthetaA; __RA[1,0] = __sthetaA; __RA[1,1] = __cthetaA; __RA[2,2] = 1.0
+        __Rg[0,0] = __cthetaA; __Rg[0,1] = -__sthetaA; __Rg[1,0] = __sthetaA; __Rg[1,1] = __cthetaA; __Rg[2,2] = 1.0
         __cthetaB = cs.cos(__thetaB); __sthetaB = cs.sin(__thetaB)
         __RB[0,0] = __cthetaB; __RB[0,1] = -__sthetaB; __RB[1,0] = __sthetaB; __RB[1,1] = __cthetaB; __RB[2,2] = 1.0
         
@@ -497,11 +498,14 @@ class Double_Slider_lim_surf_mini_dyn():
                              [f_(self.x, self.x[2], self.x[6], (self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), (self.u[4]-self.u[5]), self.u[0:4], self.beta)])
     
         # real disturbances
-        __d_real = cs.mtimes(__RA, cs.mtimes(__A, cs.mtimes(__JA1.T, -cs.mtimes(__TB2A, __f_ctact[2:4]))))
-        d_real_ = cs.Function('d', [__thetaA, __dtheta, __y_ctact, __f_ctact, __beta], [cs.vertcat(__d_real, 0.)], ['ta', 'dt', 'yc', 'fc', 'b'], ['d'])
-        self.d_real = cs.Function('f', [self.x, self.u, self.beta],
-                                  [d_real_(self.x[2], (self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), self.u[0:4], self.beta)])
-    
+        # __d_real = cs.mtimes(__RA, cs.mtimes(__A, cs.mtimes(__JA1.T, -cs.mtimes(__TB2A, __f_ctact[2:4]))))
+        __d_real = cs.mtimes(__A, cs.mtimes(__JA1.T, -cs.mtimes(__TB2A, __f_ctact[2:4])))
+        d_real_ = cs.Function('d', [__dtheta, __y_ctact, __f_ctact, __beta], [__d_real], ['dt', 'yc', 'fc', 'b'], ['d'])
+        self.d_real = cs.Function('d', [self.x, self.u, self.beta],
+                                  [d_real_((self.x[6]-self.x[2]), cs.vertcat(self.x[3],self.x[7]), self.u[0:4], self.beta)])
+        self.R_g = cs.Function('R', [__thetaA], [__Rg], ['ta'], ['rg'])
+        
+
     def solveLCP(self, x0, u0, beta):
         """
         :param x0: (x_a *3, PSI_C, x_b *3, yc_b), state variables

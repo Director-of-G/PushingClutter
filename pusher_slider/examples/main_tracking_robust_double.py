@@ -62,7 +62,7 @@ double_dyn = sliding_pack.dyn_test.Double_Slider_lim_surf_mini_dyn(
 
 # Generate Nominal Trajectory
 #  -------------------------------------------------------------------
-X_goal = [0.0, 0.3, (90./180.)*np.pi]
+X_goal = [-0.1, 0.3, (120./180.)*np.pi]
 # print(X_goal)
 x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(X_goal[0], X_goal[1], N, N_MPC)
 # x0_nom, x1_nom = sliding_pack.traj.generate_traj_line(0.5, 0.3, N, N_MPC)
@@ -122,6 +122,7 @@ optObj = sliding_pack.to.buildOptObj(
 
 # Initialize variables for plotting
 #  -------------------------------------------------------------------
+Nd = 3
 X_plot = np.empty([dyn.Nx, Nidx])
 U_plot = np.empty([dyn.Nu, Nidx-1])
 del_plot = np.empty([dyn.Nz, Nidx-1])
@@ -132,8 +133,8 @@ success = np.empty(Nidx-1)
 cost_plot = np.empty((Nidx-1, 1))
 # slider interaction
 F_int_plot = np.empty([2, Nidx])
-D_hat_plot = np.empty([dyn.Nx, Nidx])  # observed disturbance
-D_true_plot = np.empty([dyn.Nx, Nidx])  # actual disturbance
+D_hat_plot = np.empty([Nd, Nidx])  # observed disturbance
+D_true_plot = np.empty([Nd, Nidx])  # actual disturbance
 #  -------------------------------------------------------------------
 # Initialize variables for animation
 #  -------------------------------------------------------------------
@@ -173,9 +174,11 @@ x0 = x_init_val
 x0_obs = x_init_obs
 # disturbance observer
 N_exit = Nidx-2
-d0 = [0.] * dyn.Nx
-D_hat_plot[:, 0] = d0
-D_true_plot[:, 0] = [0.]*dyn.Nx
+
+d0 = np.zeros((Nd,1))
+D_hat_plot[:, 0] = [0.]*Nd
+D_true_plot[:, 0] = [0.]*Nd
+"""
 for idx in range(Nidx-1):
     print('-------------------------')
     print(idx)
@@ -200,6 +203,7 @@ for idx in range(Nidx-1):
         u_all = np.insert(deepcopy(u0), 2, u_f)
         # update the states
         # true disturbance
+        # 真实双滑块系统前向动力学
         d_true = double_dyn.d_real(np.r_[x0, x0_obs], u_all, beta)
         x_all = double_dyn.updateStates(np.r_[x0, x0_obs], u_all, beta)
         x0 = deepcopy(x_all[0:4])
@@ -213,6 +217,7 @@ for idx in range(Nidx-1):
     else:
         u_all = np.insert(deepcopy(u0), 2, [0., 0.])
         d_true = double_dyn.d_real(np.r_[x0, x0_obs], u_all, beta)
+        # 单滑块系统前向动力学
         x0 = (x0 + dyn.f(x0, u0, beta)*dt).elements()
         F_int_plot[:, idx] = [0., 0.]
     # update estimated disturbance
@@ -241,6 +246,91 @@ for idx in range(Nidx-1):
         print(S_goal_val)
         # sys.exit()
 #  -------------------------------------------------------------------
+"""
+
+L = np.diag([2,2,0.2])
+L_b = np.diag([-0.01,-0.01,-0.001])
+for idx in range(Nidx-1):
+    print('-------------------------')
+    print(idx)
+    # if idx == idxDist:
+    #     print('i died here')
+    #     x0[0] += 0.03
+    #     x0[1] += -0.03
+    #     x0[2] += 30.*(np.pi/180.)
+    # ---- solve nominal problem ----
+    resultFlag, x_opt, u_opt, del_opt, f_opt, t_opt = optObj.solveProblem(
+            idx, x0, beta, [0.] * dyn.Nx,
+            S_goal_val=S_goal_val,
+            obsCentre=obsCentre, obsRadius=obsRadius)
+    print(f_opt)
+    # ---- update initial state (simulation) ----
+    g2 = np.zeros((dyn.Nu, Nd))
+    g2[0:3,0:3] = np.array(dyn.R(x0))
+    g1 = np.zeros((dyn.Nx, dyn.Nu))
+    g1[0:3,0:2] = np.array(dyn.RAJc(x0, beta))
+    g1[3,2] = 1.
+    g1[3,3] = -1.
+    gd = np.linalg.pinv(np.linalg.pinv(g2)@g1)
+    print('gd',gd)
+    u0 = np.array(u_opt[:, 0])
+    u0 = (u0 - gd@d0)[:,0]
+    print('u0',u0)
+    print('d0', d0)
+    if contactFlag:
+        # ---- build&solve the LCP problem ----
+        # solve the contact force between two sliders
+        u_f = double_dyn.solveLCP(np.r_[x0, x0_obs], u0, beta)
+        # compute the augmented input
+        u_all = np.insert(deepcopy(u0), 2, u_f)
+        # update the states
+        # true disturbance
+        # 真实双滑块系统前向动力学
+        d_true = double_dyn.d_real(np.r_[x0, x0_obs], u_all, beta)
+        x_all = double_dyn.updateStates(np.r_[x0, x0_obs], u_all, beta)
+        x0 = deepcopy(x_all[0:4])
+        x0_obs = deepcopy(x_all[4:8])
+        # store interaction forces
+        F_int_plot[:, idx] = u_f
+        if x0_obs[3] >= 0.5*beta[1]:
+            N_exit = idx
+            import pdb; pdb.set_trace()
+            contactFlag = False
+    else:
+        u_all = np.insert(deepcopy(u0), 2, [0., 0.])
+        d_true = double_dyn.d_real(np.r_[x0, x0_obs], u_all, beta)
+        # 单滑块系统前向动力学
+        x0 = (x0 + dyn.f(x0, u0, beta)*dt).elements()
+        F_int_plot[:, idx] = [0., 0.]
+
+    g2 = np.zeros((dyn.Nu, Nd))
+    g2[0:3,0:3] = np.array(dyn.R(x0))
+    L_d = L@np.linalg.pinv(g2)
+    
+    d0 = d0 - 0.04*L@d0 + L_d@(np.expand_dims(x0,axis=1) - np.array(x_opt[:, 1]))
+    
+    D_hat_plot[:, idx+1] = d0[:,0]
+    D_true_plot[:, idx+1] = d_true.elements()
+    # ---- store values for plotting ----
+    comp_time[idx] = t_opt
+    success[idx] = resultFlag
+    cost_plot[idx] = f_opt
+    X_plot[:, idx+1] = x0
+    U_plot[:, idx] = u0
+    X_future[:, :, idx] = np.array(x_opt)
+    # ---- store values for animation ----
+    X_a_ani[:, idx] = x0[0:3]
+    X_b_ani[:, idx] = x0_obs[0:3]
+    X_ctact_ani[:, idx] = [-0.5*beta[0], -0.5*beta[0]*np.tan(x0[3])]
+    if dyn.Nz > 0:
+        del_plot[:, idx] = del_opt[:, 0].elements()
+    # ---- update selection matrix ----
+    if X_goal is not None and f_opt < 0.00001 and S_goal_idx > 10:
+        S_goal_idx -= 1
+        S_goal_val = [0]*(N_MPC-1)
+        S_goal_val[S_goal_idx] = 1
+        print(S_goal_val)
+        # sys.exit()
 
 import pdb; pdb.set_trace()
 
@@ -259,7 +349,7 @@ for i in range(2):
     axs[0, i].set_ylabel('f_n' if i == 0 else 'f_t')
     axs[0, i].grid()
     
-for i in range(dyn.Nx):
+for i in range(Nd):
     axs[1, i].plot(t_Nx, D_hat_plot[i, 0:N].T, color='red',
                    linestyle='--', label='pred')
     axs[1, i].plot(t_Nx, D_true_plot[i, 0:N].T, color='blue',
@@ -274,7 +364,7 @@ plt.show()
 
 simObj = sliding_pack.db_sim.buildDoubleSliderSimObj(
         N_exit, double_slider_config['dynamics'], 0.04, method='qpoases',
-        showAnimFlag=True, saveFileFlag=True)
+        showAnimFlag=True, saveFileFlag=False)
 
 simObj.visualization(X_a_ani.T, X_b_ani.T, X_ctact_ani.T, beta)
 
