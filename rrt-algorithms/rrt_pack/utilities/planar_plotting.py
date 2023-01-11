@@ -111,14 +111,17 @@ class PlanarPlot(object):
         """
         plot_polygon(self.X.obs.obs_conv_hull, ax=ax, add_points=False, color='lightgreen', alpha=0.3)
     
-    def plot_debug(self, samples, delay_show=False):
+    def plot_debug(self, samples, ax=None, color='blue', delay_show=False):
         """
-        Plot sampled poses.
+        Plot sliders
         :param samples: array of (x, y, theta)
+        :param ax: the canvas
+        :param color: the color of sliders
         :param delay_show: if true, won't call plt.show() and return plt.ax
         """
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
+        if ax is None:
+            fig = plt.figure()
+            ax = fig.add_subplot(111)
         # for i in range(len(self.obstacles)):
         #     coord = self.obstacles[i]
         #     ptr_set, arrow = self.plot_slider(coord)
@@ -128,7 +131,7 @@ class PlanarPlot(object):
             coord = samples[i]
             ptr_set, arrow = self.plot_slider(coord)
             ax.arrow(coord[0], coord[1], arrow[0], arrow[1])
-            ax.plot(ptr_set[:, 0], ptr_set[:, 1], color='blue')
+            ax.plot(ptr_set[:, 0], ptr_set[:, 1], color=color)
         plt.xlim(self.X_dimensions[0])
         plt.ylim(self.X_dimensions[1])
         plt.gca().set_aspect('equal')

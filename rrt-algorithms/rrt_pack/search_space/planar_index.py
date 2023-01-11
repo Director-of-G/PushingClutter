@@ -75,9 +75,9 @@ class PlanarIndex(object):
                 polygon = gen_polygon(coord, geom)
                 return sum([not (poly.intersection(polygon).is_empty) for poly in self.obs])
             
-    def translation_collision_free(self, pose1, pose2, shape):
+    def collision_free(self, pose1, pose2, shape):
         """
-        Return true is the translation only movement between pose1 and pose2 are collision free
+        Return true is movement (translation only or small angle rotation) between pose1 and pose2 are collision free
         Return false otherwise
         :param pose1: pose1
         :param pose2: pose2
@@ -123,7 +123,7 @@ if __name__ == '__main__':
     #                               max_iter=5000,
     #                               obs=PlanarIndex())
     X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
-    debug_obs = np.load('./data/debug_obs8.npy')
+    debug_obs = np.load('./data/debug_obs6.npy')
     debug_shape = [[0.07, 0.12] for i in range(len(debug_obs))]
     
     debug_index = PlanarIndex(X_dimensions, debug_obs, debug_shape, debug_obs[2, :], debug_shape[2])

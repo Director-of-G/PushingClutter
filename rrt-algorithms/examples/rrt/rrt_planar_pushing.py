@@ -71,8 +71,8 @@ X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
 # x_goal = (0.405, 0.425, np.pi / 2)  # goal location
 
 # object retrieval from clutter
-O_file = '../../rrt_pack/search_space/data/debug_obs8.npy'
-O_index = 2
+O_file = '../../rrt_pack/search_space/data/debug_obs6.npy'
+O_index = 3
 Obstacles = np.load(O_file)
 x_init = tuple(Obstacles[O_index, :])  # starting location
 x_goal = (0.02, 0.22, 0.4*np.pi)  # goal location
@@ -96,15 +96,15 @@ ab_ratio = 1 / 726.136
 # X = PlanarSearchSpace(X_dimensions, Obstacles)
 
 # Object retrieval case
-X = PlanarSearchSpace(X_dimensions, O=None, O_file=O_file, O_index=O_index)
+X = PlanarSearchSpace(X_dimensions, O=None, O_file=O_file, O_index=O_index, sample='heuristic')
 Obstacles = np.delete(Obstacles, O_index, axis=0)
 
 X.create_slider_geometry(geom=slider_geom)
 X.create_slider_dynamics(ratio=ab_ratio, miu=miu)
 
 # check goal feasibility
-if not X.obstacle_free(x_goal):
-       raise Exception('Planar RRT: Goal pose infeasible!')
+# if not X.obstacle_free(x_goal):
+#        raise Exception('Planar RRT: Goal pose infeasible!')
 
 # create rrt_search
 if args.method == Method.rrt:

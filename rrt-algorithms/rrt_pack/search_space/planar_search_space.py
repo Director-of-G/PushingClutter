@@ -19,13 +19,14 @@ from rrt_pack.utilities.sampling import WeightedSampler
 DEFAULT_GEOM = [0.07, 0.12]
 
 class PlanarSearchSpace(object):
-    def __init__(self, dimension_lengths, O=None, O_file=None, O_index=None):
+    def __init__(self, dimension_lengths, O=None, O_file=None, O_index=None, sample='random'):
         """
         Initialize Search Space
         :param dimension_lengths: range of each dimension
         :param O: list of obstacles
         :param O_file: the file containing obstacle and object configurations
         :param O_index: the object index
+        :param sample: sampling mode ('random', 'heuristic')
         """
         # slider geometry
         self.geom = None
@@ -33,6 +34,7 @@ class PlanarSearchSpace(object):
         self.miu = None
         self.slider_relcoords = None  # relative coords of vertices in slider frame
         self.X_dimensions = dimension_lengths
+        self.sample_mode = sample
         # sanity check
         if len(dimension_lengths) < 2:
             raise Exception("Must have at least 2 dimensions")
@@ -65,8 +67,9 @@ class PlanarSearchSpace(object):
             if any(o[i] >= o[int(i + len(o) / 2)] for o in O for i in range(int(len(o) / 2))):
                 raise Exception("Obstacle start must be less than obstacle end")
             self.obs = index.Index(obstacle_generator(O), interleaved=True, properties=p)
-            
-        self.sampler = WeightedSampler()
+        
+        if self.sample_mode == 'heuristic':
+            self.sampler = WeightedSampler()
             
     def create_slider_geometry(self, geom):
         self.geom = geom  # slider's geometric boundary
@@ -324,9 +327,11 @@ class PlanarSearchSpace(object):
         # #     x = np.random.uniform(np.r_[self.dimension_lengths[:2, 0], 0.9*np.pi], 
         # #                           np.r_[self.dimension_lengths[:2, 1], 1.1*np.pi])
         # else:
-        #    x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
         
-        x = self.sampler.sample(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
+        if self.sample_mode == 'random':
+            x = np.random.uniform(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
+        elif self.sample_mode == 'heuristic':
+            x = self.sampler.sample(self.dimension_lengths[:, 0], self.dimension_lengths[:, 1])
         
         return tuple(x)
     

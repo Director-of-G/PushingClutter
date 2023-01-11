@@ -9,33 +9,69 @@ import numpy as np
 # import pyomo.environ as pe
 # from pao.pyomo import *
 import portion as P
-from shapely.geometry import LineString, Polygon, MultiLineString, MultiPolygon
-from shapely import affinity, intersection
+from shapely.geometry import Point, LineString, Polygon, MultiLineString, MultiPolygon
+from shapely import affinity, contains, intersection
 
 import rrt_pack
 from rrt_pack.search_space.planar_search_space import PlanarSearchSpace
 from rrt_pack.utilities.geometry import planar_dist_between_points, centering_polygon
+from rrt_pack.utilities.math import angle_diff, get_arg_k_min
 
 class MinkowskiSum(object):
     """
     MinkowskiSum generates collision free space CFree for each rotation layer
     All objects and obstacles are polygons.
     :param X: Search Space
+    :param x_init: the init configuration (x, y, theta)
     :param r: the resolution in collision checking
     :param w: the weight for measuring planar distance
     :param n_slice: the number of slices
     :param n_line: the number of sweeping lines per slice
     """
-    def __init__(self, X:PlanarSearchSpace, r, w, n_slice, n_line) -> None:
+    def __init__(self, X:PlanarSearchSpace, x_init, r, w, n_slice, n_line) -> None:
         self.X = X
         self.G = nx.Graph()  # the Graph Structure
         self.G_index = {}  # the Graph vertex index by name
-        self.theta = [0.0]  # list of discretized theta
         
+        self.x_init = x_init
         self.r = r
         self.w = w
         self.n_slice = n_slice
         self.n_line = n_line
+        
+        # sampling rotation (list of discretized theta, increasing order)
+        self.theta_list = self.sample_rotation()
+        self.theta_list.reverse()
+        
+    def sample_rotation(self):
+        """
+        Sample rotation between [-pi,pi], and must contain 0
+        :return: theta, list
+        """
+        theta = np.linspace(0, 2*np.pi, self.n_slice+1)[:-1]
+        theta[theta>np.pi] -= (2*np.pi)
+        
+        return theta.tolist()
+    
+    def add_init_vertex(self):
+        """
+        Add the init configuration to graph as a vertex, and add connections to neighbors
+        Connections are made in adjacent lines in adjacent layers
+        """
+        self.G.add_node('start', loc=self.x_init)
+        # decide adjacent theta indexes and line indexes
+        theta_diff = np.array([angle_diff(theta, angle_diff(self.x_init[2], self.X.obs.obj_theta0)) for theta in self.theta_list])
+        theta_diff = np.abs(theta_diff)
+        theta_indexes = get_arg_k_min(theta_diff, k=3)
+        ymin, ymax = self.X.X_dimensions[1]
+        yslice = np.linspace(ymin, ymax, self.n_line+2)[1:-1]
+        y_diff = np.abs(yslice-self.x_init[1])
+        line_indexes = get_arg_k_min(y_diff, k=2)
+        for theta_index in theta_indexes:
+            for line_index in line_indexes:
+                for node_index in self.G_index[theta_index][line_index]:
+                    node_name = 'theta{0}_line{1}_node{2}'.format(theta_index, line_index, node_index)
+                    self.add_edge_to_graph('start', node_name)
         
     def minkowski_operation_polygons(self, poly1:Polygon, poly2:Polygon, sum=True):
         """
@@ -425,7 +461,7 @@ class MinkowskiSum(object):
         else:
             line_num_dict[line_index] += 1
         # get the indexes and node name
-        theta_index = self.theta.index(theta)
+        theta_index = self.theta_list.index(theta)
         node_index = line_num_dict[line_index]-1
         node_name = 'theta{0}_line{1}_node{2}'.format(theta_index, line_index, node_index)
         # add the node to Graph index
@@ -477,7 +513,7 @@ class MinkowskiSum(object):
         :param theta: the additional rotation angle (anti-clockwise) of the object
         :return: subgraph
         """
-        theta_index = self.theta.index(theta)
+        theta_index = self.theta_list.index(theta)
         subgraph = sorted(self.G_index[theta_index].items(), key=lambda d: d[0], reverse=False)
         
         return subgraph
@@ -490,7 +526,7 @@ class MinkowskiSum(object):
         :param line_index: the line index
         :return: vertex, the list of tuple [(node_name, node_position)]
         """
-        theta_index = self.theta.index(theta)
+        theta_index = self.theta_list.index(theta)
         vertex = subgraph[line_index][1]
         node_name = ['theta{0}_line{1}_node{2}'.format(theta_index, line_index, node_index) for node_index in vertex]
         vertex = sorted(dict(zip(node_name, [self.G.nodes[name]['loc'] for name in node_name])).items(), key=lambda d: d[1][0], reverse=False)
@@ -508,7 +544,7 @@ class MinkowskiSum(object):
         # # too slow
         # if self.X.collision_free(pos1, pos2, r=self.r):
         # # much faster
-        if self.X.obs.translation_collision_free(pos1, pos2, self.X.obs.obj_shape):
+        if self.X.obs.collision_free(pos1, pos2, self.X.obs.obj_shape):
         # if True:
             dist = planar_dist_between_points(pos1, pos2, self.w)
             self.G.add_edge(node1, node2, length=dist)
@@ -552,12 +588,99 @@ class MinkowskiSum(object):
         self.generate_and_add_edge(theta)
         
         return C_free
+    
+    def connect_adjacent_C_layer(self, theta):
+        """
+        Connect the layer of theta to one adjacent layer
+        :param theta: the theta of current layer
+        """
+        theta_index = self.theta_list.index(theta)
+        # skip the top sweep line
+        if theta_index >= self.n_line - 1:
+            return
+        subgraph = self.get_sorted_subgraph(theta)
+        theta_index_next = theta_index + 1
+        theta_next = self.theta_list[theta_index_next]
+        subgraph_next = self.get_sorted_subgraph(theta_next)
+        for i in range(len(subgraph)):
+            node_i = self.get_vertex_on_line(theta, subgraph, i)
+            node_i_next = self.get_vertex_on_line(theta_next, subgraph_next, i)
+            for (node_i_j, node_i_next_j) in product(node_i, node_i_next):
+                self.add_edge_to_graph(node_i_j[0], node_i_next_j[0])
+        
+    def build_road_map(self):
+        """
+        Construct the connected multi-later Highway Roadmap
+        """
+        # decompose all C layers
+        for theta in self.theta_list:
+            _ = self.decompose_single_C_layer(theta)
+        
+        # connect C layers to adjacent C layers
+        for theta in self.theta_list[:-1]:
+            self.connect_adjacent_C_layer(theta)
+            
+    def get_shortest_path(self, n_path, pose=False):
+        """
+        Get the shortest paths for the target object to move out of the convex hull of obstacles
+        :param n_path: the number of paths to return
+        :param pose: if true
+                        :return: flag, true if successful, false if failed
+                        :return: paths, the list of [(distance, [node0, node1, ..., nodek])]
+                     if false
+                        :return: flag, true if successful, false if failed
+                        :return: paths, the list of [(distance, [(x0,y0,theta0), (x1,y1,theta1), ..., (xk,yk,thetak)])]
+        """
+        # get the target nodes
+        target_nodes = []
+        for theta_index, C_layer in self.G_index.items():
+            for line_index, node_list in C_layer.items():
+                for node_index in node_list:
+                    node_name = 'theta{0}_line{1}_node{2}'.format(theta_index, line_index, node_index)
+                    if not contains(self.X.obs.obs_conv_hull, Point(self.G.nodes[node_name]['loc'][:2])):
+                        target_nodes.append(node_name)
+        
+        # the task is infeasible
+        if len(target_nodes) == 0:
+            return False, None
+        
+        # add the init vertex
+        self.add_init_vertex()
+        
+        # dijkstra algorithm
+        short_path = nx.single_source_dijkstra(self.G, 'start', weight='length')
+        goal_path = []
+        for node_name in target_nodes:
+            if node_name not in short_path[0]:
+                continue
+            goal_path.append((short_path[0][node_name], short_path[1][node_name]))
+            
+        # the target is unreachable
+        if len(goal_path) == 0:
+            return False, None
 
+        # sort the target path by distance
+        goal_path = sorted(goal_path, key=lambda d: d[0], reverse=False)
+        goal_path = goal_path[:min(len(goal_path), n_path)]
+        
+        if pose is False:
+            return True, goal_path
+        else:
+            goal_path_with_pose = [(path[0], []) for path in goal_path]
+            for i in range(len(goal_path)):
+                for via_node in goal_path[i][1]:
+                    via_pose = self.G.nodes[via_node]['loc']
+                    goal_path_with_pose[i][1].append(via_pose)
+            return True, goal_path_with_pose
 
 if __name__ == '__main__':
     X_dimensions = np.array([(-0.1, 0.6), (-0.1, 0.6), (-np.pi, np.pi)])
-    O_file = '../search_space/data/debug_obs8.npy'
-    O_index = 2
+    O_file = '../search_space/data/debug_obs6.npy'
+    O_index = 3
+    # O_file = '../search_space/data/debug_obs7.npy'
+    # O_index = 3
+    # O_file = '../search_space/data/debug_obs8.npy'
+    # O_index = 2
     debug_obs = np.load(O_file)
     debug_shape = [[0.07, 0.12] for i in range(len(debug_obs))]
     X = PlanarSearchSpace(X_dimensions, None, O_file, O_index)
@@ -565,7 +688,11 @@ if __name__ == '__main__':
     X.create_slider_dynamics(ratio = 1 / 726.136, miu=0.2)
     
     # test parse polygons
-    MS = MinkowskiSum(X, r=0.001, w=[1.0, 1.0, 0.0695*100], n_slice=60, n_line=35)
+    MS = MinkowskiSum(X, x_init=tuple(debug_obs[O_index, :]), 
+                      r=0.001,
+                      w=[1.0, 1.0, 0.0695*100],
+                      n_slice=20,
+                      n_line=15)
     # poly_mat = MS.parse_polygons(theta=0.0)
     
     # test Minkowski sum
@@ -603,29 +730,45 @@ if __name__ == '__main__':
     # import pdb; pdb.set_trace()
     
     # # test constructing one slice
-    C_free = MS.decompose_single_C_layer(theta=0.0)
+    # C_free = MS.decompose_single_C_layer(theta=0.0)
     
-    # plot debug
+    # # plot debug
     from matplotlib import pyplot as plt
-    O_plot = np.delete(debug_obs, O_index, axis=0)
-    plot = rrt_pack.pl_plot.PlanarPlot(filename=None, X=X)
-    ax = plot.plot_debug(O_plot, delay_show=True)
-    # plot C_free
-    for y, free_range in C_free.items():
-        for range in free_range:
-            if range.empty: continue
-            xl, xu = range.lower, range.upper
-            ax.plot([xl, xu], [y, y], linestyle='-', c='seagreen')
-    # plot vertex
-    for theta_index in MS.G_index:
-        for line_index in MS.G_index[theta_index]:
-            for node_index in MS.G_index[theta_index][line_index]:
-                node_name = 'theta{0}_line{1}_node{2}'.format(theta_index, line_index, node_index)
-                node_loc = MS.G.nodes[node_name]['loc']
-                plt.scatter(node_loc[0], node_loc[1], s=8, color='red')
-    # plot edges
-    for node1, node2 in list(MS.G.edges()):
-        node_loc1, node_loc2 = MS.G.nodes[node1]['loc'], MS.G.nodes[node2]['loc']
-        ax.plot([node_loc1[0], node_loc2[0]], [node_loc1[1], node_loc2[1]], linestyle='-', linewidth=2, c='seagreen')
+    # O_plot = np.delete(debug_obs, O_index, axis=0)
+    # plot = rrt_pack.pl_plot.PlanarPlot(filename=None, X=X)
+    # ax = plot.plot_debug(O_plot, delay_show=True)
+    # # plot C_free
+    # for y, free_range in C_free.items():
+    #     for range in free_range:
+    #         if range.empty: continue
+    #         xl, xu = range.lower, range.upper
+    #         ax.plot([xl, xu], [y, y], linestyle='-', c='seagreen')
+    # # plot vertex
+    # for theta_index in MS.G_index:
+    #     for line_index in MS.G_index[theta_index]:
+    #         for node_index in MS.G_index[theta_index][line_index]:
+    #             node_name = 'theta{0}_line{1}_node{2}'.format(theta_index, line_index, node_index)
+    #             node_loc = MS.G.nodes[node_name]['loc']
+    #             plt.scatter(node_loc[0], node_loc[1], s=8, color='red')
+    # # plot edges
+    # for node1, node2 in list(MS.G.edges()):
+    #     node_loc1, node_loc2 = MS.G.nodes[node1]['loc'], MS.G.nodes[node2]['loc']
+    #     ax.plot([node_loc1[0], node_loc2[0]], [node_loc1[1], node_loc2[1]], linestyle='-', linewidth=2, c='seagreen')
+    # plt.show()
     
+    # test build roadmap
+    MS.build_road_map()
+    # import pickle
+    # MS.G = pickle.load(open('./data/roadmap_graph3.pkl', 'rb'))
+    # MS.G_index = pickle.load(open('./data/roadmap_index3.pkl', 'rb'))
+    import pdb; pdb.set_trace()
+
+    # test get shortest path
+    _, path_with_pose = MS.get_shortest_path(n_path=1, pose=True)
+    import pdb; pdb.set_trace()
+    
+    from rrt_pack.utilities.planar_plotting import PlanarPlot
+    plot = PlanarPlot(filename=None, X=X)
+    ax = plot.plot_debug(debug_obs, color='red', delay_show=True)
+    ax = plot.plot_debug(path_with_pose[0][1], ax=ax, color='blue', delay_show=True)
     plt.show()
